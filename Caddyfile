@@ -1,0 +1,37 @@
+# Caddyfile
+# Replace "your-domain.com" with your actual Contabo domain/IP
+# For bare IP: use http://your.ip.address { ... } (no auto TLS)
+# For domain: just use your-domain.com { ... } (Caddy auto-provisions TLS)
+
+domianmt5.xyz {
+
+    reverse_proxy app:8000 {
+        lb_policy round_robin
+
+        health_uri     /health
+        health_interval 10s
+        health_timeout  5s
+        health_status  200
+
+        transport http {
+            keepalive          30s
+            keepalive_idle_conns 10
+        }
+    }
+
+    encode gzip
+
+    header {
+        X-Content-Type-Options  nosniff
+        X-Frame-Options         DENY
+        X-XSS-Protection        "1; mode=block"
+        Referrer-Policy         strict-origin-when-cross-origin
+        -Server
+    }
+
+    log {
+        output stdout
+        format json
+        level  INFO
+    }
+}

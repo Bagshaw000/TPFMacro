@@ -1,0 +1,75 @@
+name: Deploy to Contabo
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+    types: [ closed ]
+
+jobs:
+  deploy:
+    if: github.event.pull_request.merged == true || github.event_name == 'push'
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v6
+      
+    - name: Create .env file
+      run: |
+        echo "DOPPLER_TOKEN=${{ secrets.DOPPLER_TOKEN }}" > .env
+        echo "GIT_COMMIT=${{ github.sha }}"                >> .env
+        echo "Created .env with $(wc -l < .env) lines"
+    
+    - name: Copy .env to server
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.CONTABO_HOST }}
+        username: ${{ secrets.CONTABO_USER }}
+        key: ${{ secrets.CONTABO_SSH_KEY }}
+        port: 22
+        source: ".env"
+        target: "/macro"
+        overwrite: true
+
+
+    - name: Copy files via SCP
+      uses: appleboy/scp-action@v0.1.7
+      with:
+        host: ${{ secrets.CONTABO_HOST }}
+        username: ${{ secrets.CONTABO_USER }}
+        key: ${{ secrets.CONTABO_SSH_KEY }}
+        port: 22
+        source: "."
+        target: "/macro"
+        strip_components: 0
+        overwrite: true
+        
+    - name: Deploy via SSH
+      uses: appleboy/ssh-action@v1.0.3
+      with:
+        host: ${{ secrets.CONTABO_HOST }}
+        username: ${{ secrets.CONTABO_USER }}
+        key: ${{ secrets.CONTABO_SSH_KEY }}
+        port: 22
+        script: |
+          cd /macro
+          
+          [ -f .env ] && echo ".env found" || { echo ".env missing"; exit 1; }
+          grep -q "DOPPLER_TOKEN" .env && echo "DOPPLER_TOKEN present" || { echo "DOPPLER_TOKEN missing"; exit 1; }
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          
+          docker compose down
+          docker compose up -d --build
+          
+          # Clean up old images
+          docker image prune -f
+          
+          # Check status
+          docker compose ps
+
+          
+          # Show logs
+          docker compose logs macro --tail=30
+          docker compose logs worker --tail=20

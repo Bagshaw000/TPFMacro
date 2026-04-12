@@ -1,0 +1,38 @@
+# .dockerignore
+__pycache__/
+**/__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+.env
+.env.*
+!.env.example
+.venv/
+venv/
+env/
+
+.git/
+.github/
+*.md
+
+# Test artifacts
+.pytest_cache/
+htmlcov/
+.coverage
+tests/
+
+# IDE
+.vscode/
+.idea/
+
+# Logs
+*.log
+logs/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Docker
+docker-compose.override.yml
