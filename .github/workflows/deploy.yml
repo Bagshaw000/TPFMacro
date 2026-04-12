@@ -27,7 +27,7 @@ jobs:
       with:
         host: ${{ secrets.CONTABO_HOST }}
         username: ${{ secrets.CONTABO_USER }}
-        key: ${{ secrets.CONTABO_SSH_KEY }}
+        key: ${{ secrets.CONTABO_SSHKEY }}
         port: 22
         source: ".env"
         target: "/macro"
@@ -39,7 +39,7 @@ jobs:
       with:
         host: ${{ secrets.CONTABO_HOST }}
         username: ${{ secrets.CONTABO_USER }}
-        key: ${{ secrets.CONTABO_SSH_KEY }}
+        key: ${{ secrets.CONTABO_SSHKEY }}
         port: 22
         source: "."
         target: "/macro"
