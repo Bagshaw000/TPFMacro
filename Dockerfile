@@ -28,9 +28,11 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     gnupg \  
     && rm -rf /var/lib/apt/lists/*
 
-# # Install Doppler CLI using their official install script (always up to date)
-# RUN curl -Ls --tlsv1.2 --proto "=https" \
-#     https://cli.doppler.com/install.sh | sh
+# Install Doppler CLI using their official install script (always up to date)
+RUN curl -Ls --tlsv1.2 --proto "=https" \
+    https://cli.doppler.com/install.sh | sh
+# Add Doppler to PATH (it installs to /root/.doppler/bin/doppler by default)
+ENV PATH="/root/.doppler/bin:${PATH}"
 
 COPY --from=builder /install /usr/local
 COPY . .
