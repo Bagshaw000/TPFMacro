@@ -25,6 +25,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     libpq5 \
     curl \
     ca-certificates \
+    gnupg \  
     && rm -rf /var/lib/apt/lists/*
 
 # Install Doppler CLI using their official install script (always up to date)
