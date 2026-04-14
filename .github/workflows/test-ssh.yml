@@ -15,19 +15,19 @@ jobs:
           echo "Checking secrets are configured..."
           [ -z "${{ secrets.CONTABO_HOST }}" ]  && echo "❌ CONTABO_HOST is empty"  || echo "✅ CONTABO_HOST is set"
           [ -z "${{ secrets.CONTABO_USER }}" ]  && echo "❌ CONTABO_USER is empty"  || echo "✅ CONTABO_USER is set"
-          [ -z "${{ secrets.CONTABO_SSH_KEY }}" ] && echo "❌ CONTABO_SSH_KEY is empty" || echo "✅ CONTABO_SSH_KEY is set (length: ${#SSH_KEY})"
+          [ -z "${{ secrets.CONTABO_SSHKEY }}" ] && echo "❌ CONTABO_SSH_KEY is empty" || echo "✅ CONTABO_SSH_KEY is set (length: ${#SSH_KEY})"
         env:
-          SSH_KEY: ${{ secrets.CONTABO_SSH_KEY }}
+          SSH_KEY: ${{ secrets.CONTABO_SSHKEY }}
 
       - name: Test SSH Connection
         uses: appleboy/ssh-action@v1.0.0
         with:
           host: ${{ secrets.CONTABO_HOST }}
           username: ${{ secrets.CONTABO_USER }}
-          key: ${{ secrets.CONTABO_SSH_KEY }}
+          key: ${{ secrets.CONTABO_SSHKEY }}
           port: 22
-          # FIX: add timeout so job doesn't hang forever if SSH fails
-          connect_timeout: 30s
+          # # FIX: add timeout so job doesn't hang forever if SSH fails
+          # connect_timeout: 30s
           script: |
             echo "✅ SSH Connection Successful!"
             echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
