@@ -61,7 +61,11 @@ jobs:
           echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
           
           docker compose down
-          docker compose up -d --build --no-cache
+          # Build with no cache
+          docker compose build --no-cache
+
+          # Start containers
+          docker compose up -d
           
           # Clean up old images
           docker image prune -f
