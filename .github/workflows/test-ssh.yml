@@ -1,0 +1,51 @@
+name: Test SSH Connection
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  test-ssh:
+    runs-on: ubuntu-latest
+    steps:
+
+      - name: Verify secrets are set
+        run: |
+          echo "Checking secrets are configured..."
+          [ -z "${{ secrets.CONTABO_HOST }}" ]  && echo "❌ CONTABO_HOST is empty"  || echo "✅ CONTABO_HOST is set"
+          [ -z "${{ secrets.CONTABO_USER }}" ]  && echo "❌ CONTABO_USER is empty"  || echo "✅ CONTABO_USER is set"
+          [ -z "${{ secrets.CONTABO_SSH_KEY }}" ] && echo "❌ CONTABO_SSH_KEY is empty" || echo "✅ CONTABO_SSH_KEY is set (length: ${#SSH_KEY})"
+        env:
+          SSH_KEY: ${{ secrets.CONTABO_SSH_KEY }}
+
+      - name: Test SSH Connection
+        uses: appleboy/ssh-action@v1.0.0
+        with:
+          host: ${{ secrets.CONTABO_HOST }}
+          username: ${{ secrets.CONTABO_USER }}
+          key: ${{ secrets.CONTABO_SSH_KEY }}
+          port: 22
+          # FIX: add timeout so job doesn't hang forever if SSH fails
+          connect_timeout: 30s
+          script: |
+            echo "✅ SSH Connection Successful!"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🖥️  Hostname:    $(hostname)"
+            echo "👤  User:        $(whoami)"
+            echo "📁  Directory:   $(pwd)"
+            echo "🐧  OS:          $(cat /etc/os-release | grep PRETTY_NAME | cut -d= -f2)"
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "💾  Disk space:"
+            df -h /
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🧠  Memory:"
+            free -h
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "🐳  Docker version:"
+            docker --version
+            echo "🐳  Docker Compose version:"
+            docker compose version
+            echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+            echo "📦  Running containers:"
+            docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}" 2>/dev/null || echo "No containers running"
