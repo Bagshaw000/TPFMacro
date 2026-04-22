@@ -1,8 +1,11 @@
 from functools import lru_cache
+import sys
+import os
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import logging
 from dopplersdk import DopplerSDK
 from dotenv import load_dotenv
-from ..custom_types.config import ConfigType
+from custom_types.config import ConfigType
 import os
 
 
@@ -33,4 +36,4 @@ def get_doppler_env():
     
     return doppler_secret()
 
-doppler_secret()
+print(doppler_secret())

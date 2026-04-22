@@ -1,4 +1,4 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 import os
 from src.database import db_connect
 from convex import ConvexClient
@@ -24,9 +24,11 @@ app = FastAPI(lifespan=lifespan)
 
 @app.get("/health")
 async def read_root():
-
+    try:
     # Test redis health
-    return {"status": "ok"}
+        return {"status": "ok"}
+    except:
+        raise HTTPException(status_code=503, detail="Redis unavailable")
 
 
 @app.get("/items/{item_id}")

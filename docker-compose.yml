@@ -40,7 +40,7 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    command: doppler run -- arq src.worker.WorkerSettings
+    command: arq src.worker.WorkerSettings
     environment:
       - DOPPLER_TOKEN=${DOPPLER_TOKEN}
       

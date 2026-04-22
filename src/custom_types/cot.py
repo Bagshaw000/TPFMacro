@@ -1,7 +1,7 @@
 from datetime import datetime
 
 from pydantic import BaseModel, Field, field_validator
-from typing import Optional
+from typing import Any, Optional
 import pandas as pd
 
 class CFTCData(BaseModel):
@@ -125,31 +125,22 @@ class CFTCData(BaseModel):
     # Primary key and additional required fields
     # id: int  # bigint not null
     Market: str  # text not null
-    # @field_validator('Change_in_Open_Interest_All', 'Change_in_Dealer_Long_All', 
-    #                  'Change_in_Dealer_Short_All', 'Change_in_Dealer_Spread_All',
-    #                  'Change_in_Asset_Mgr_Long_All', 'Change_in_Asset_Mgr_Short_All',
-    #                  'Change_in_Asset_Mgr_Spread_All', 'Change_in_Lev_Money_Long_All',
-    #                  'Change_in_Lev_Money_Short_All', 'Change_in_Lev_Money_Spread_All',
-    #                  'Change_in_Other_Rept_Long_All', 'Change_in_Other_Rept_Short_All',
-    #                  'Change_in_Other_Rept_Spread_All', 'Change_in_Tot_Rept_Long_All',
-    #                  'Change_in_Tot_Rept_Short_All', 'Change_in_NonRept_Long_All',
-    #                  'Change_in_NonRept_Short_All',
-    #                  'Traders_Dealer_Long_All', 'Traders_Dealer_Short_All',
-    #                  'Traders_Dealer_Spread_All', 'Traders_Asset_Mgr_Long_All',
-    #                  'Traders_Asset_Mgr_Short_All', 'Traders_Asset_Mgr_Spread_All',
-    #                  'Traders_Lev_Money_Long_All', 'Traders_Lev_Money_Short_All',
-    #                  'Traders_Lev_Money_Spread_All', 'Traders_Other_Rept_Long_All',
-    #                  'Traders_Other_Rept_Short_All', 'Traders_Other_Rept_Spread_All',
-    #                  mode='before')
-    # @classmethod
-    # def convert_to_string(cls, v):
-    #     """Convert numeric values to string, handle NaN/None"""
-    #     if v is None or pd.isna(v):
-    #         return None
-    #     # Convert to string, removing .0 for integers if desired
-    #     if isinstance(v, (int, float)):
-    #         # Check if it's a whole number
-    #         if isinstance(v, float) and v.is_integer():
-    #             return str(int(v))
-    #         return str(v)
-    #     return str(v) if v is not None else None
+    @field_validator('Change_in_Open_Interest_All', 'Change_in_Dealer_Long_All', 
+                     'Change_in_Dealer_Short_All', 'Change_in_Dealer_Spread_All',
+                     'Change_in_Asset_Mgr_Long_All', 'Change_in_Asset_Mgr_Short_All',
+                     'Change_in_Asset_Mgr_Spread_All', 'Change_in_Lev_Money_Long_All',
+                     'Change_in_Lev_Money_Short_All', 'Change_in_Lev_Money_Spread_All',
+                     'Change_in_Other_Rept_Long_All', 'Change_in_Other_Rept_Short_All',
+                     'Change_in_Other_Rept_Spread_All', 'Change_in_Tot_Rept_Long_All',
+                     'Change_in_Tot_Rept_Short_All', 'Change_in_NonRept_Long_All',
+                     'Change_in_NonRept_Short_All',
+                     'Traders_Dealer_Long_All', 'Traders_Dealer_Short_All',
+                     'Traders_Dealer_Spread_All', 'Traders_Asset_Mgr_Long_All',
+                     'Traders_Asset_Mgr_Short_All', 'Traders_Asset_Mgr_Spread_All',
+                     'Traders_Lev_Money_Long_All', 'Traders_Lev_Money_Short_All',
+                     'Traders_Lev_Money_Spread_All', 'Traders_Other_Rept_Long_All',
+                     'Traders_Other_Rept_Short_All', 'Traders_Other_Rept_Spread_All',
+                     mode='before')
+    @classmethod
+    def parse_dot_as_none(cls, v: Any) -> Any:
+        return 0 if v == '.' else v

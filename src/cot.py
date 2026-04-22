@@ -1,3 +1,9 @@
+import os
+import sys
+
+import numpy as np
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 import asyncio
 import json
 import logging
@@ -5,10 +11,11 @@ import math
 from typing import Optional
 import cot_reports as cot
 from pydantic import BaseModel
-from .database import db_connect
-from .model import CotModel
+from database.db import db_connect
+from model import CotModel
 import pandas as pd
-from .custom_types.cot import CFTCData
+from controller.cot import COTController
+from custom_types.cot import CFTCData
 from datetime import datetime, date
 import re
 
@@ -16,7 +23,7 @@ class COT:
     
     def __init__(self):
         self.db = db_connect()
-        
+        self.cot_ctrl = COTController()
         self.cot_model = CotModel()
         
     async def get_cot(self):
@@ -386,7 +393,9 @@ class COT:
     async def update_cot(self):
         try:
             # Get all the last entrries for all 
-            last_entry = await self.cot_model.get_latest_cot_data()
+            last_entry = await self.cot_model.get_last_entry()
+            # print(last_entry)
+            # return
             instrument_map = dict()
             updated_cot_list = list()
             
@@ -456,7 +465,16 @@ class COT:
             
             #  Update database 
             if len(updated_cot_list) != 0:
-                await self.cot_model.insert_tff_report(updated_cot_list)
+                dup_df = pd.DataFrame(updated_cot_list)
+                df_unique = dup_df.drop_duplicates(subset=['Market_and_Exchange_Names', 'Report_Date_as_YYYY_MM_DD'],keep="last").replace({np.nan: None, np.inf: None, -np.inf: None})
+                unique_dicts = df_unique.to_dict('records')
+                
+                cftc_models = [CFTCData(**dict_item).model_dump() for dict_item in unique_dicts]
+         
+                
+                await self.cot_model.update_ttf_report(cftc_models)
+                await self.cot_ctrl.insert_cot_redis(cftc_models)
+                print("Done")
              
         except Exception as e:
             logging.error(f'Error updating cot data : {e}', exc_info=True)
