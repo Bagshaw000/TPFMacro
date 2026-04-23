@@ -36,6 +36,15 @@ MANIFEST
 pip-log.txt
 pip-delete-this-directory.txt
 
+# Cot File
+t.txt
+FinFutYY.txt
+
+cot_all.csv
+cot_fut_all.csv
+cot.csv
+fut_2006.csv
+
 # Unit test / coverage reports
 htmlcov/
 .tox/
