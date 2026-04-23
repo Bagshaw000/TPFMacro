@@ -59,7 +59,15 @@ class COTController:
             cur_pct,ind_pct,fin_pct,crypt_pct = await asyncio.gather(self.calculate_all_change(currency_data),self.calculate_all_change(indices_data),self.calculate_all_change(financial_data),self.calculate_all_change(crypto_data)) 
         
             await self.interpret_pct_change(cur_pct,"Currency")
-                
+            
+            data = {
+                "Currency":cur_pct,
+                "Indicies":ind_pct,
+                "Financial":fin_pct,
+                "Crypto":crypt_pct
+            }  
+            
+            return data
             # if check_cot:
        
             #     # print("Not empty")
@@ -179,10 +187,29 @@ class COTController:
                             if date in df.index:  # Only original data points
                                 period_data[str(date.date())] = value                        
 
-                        
+                        # Limit the amount of data by the last 52 weeks
                         if period_data:
-                            field_results[period_name] = period_data
-                            # print(f"    {period_name}: {len(period_data)} changes calculated")
+                            if period_name == "1_month":
+                                sliced_dict = list(period_data.items())
+                                
+                                field_results[period_name] = dict(sliced_dict[-52:])
+                            
+                            if period_name == "3_month":
+                                sliced_dict = list(period_data.items())
+                                
+                                field_results[period_name] = dict(sliced_dict[-18:])
+                                
+                            if period_name == "6_month":
+                                sliced_dict = list(period_data.items())
+                                
+                                field_results[period_name] = dict(sliced_dict[-9:])
+                                
+                            if period_name == "1_year":
+                                sliced_dict = list(period_data.items())
+                                
+                                field_results[period_name] = dict(sliced_dict[-5:])
+                            
+                           
                         
             
                     if field_results:
@@ -243,7 +270,8 @@ class COTController:
             return data_list
         except Exception as e:
             logging.error(f"Error batch processing : {e}")
-            
+
+    # This insert the cot_ttf into the redis
     async def insert_cot_redis(self, data:list):
         try:
             # pass

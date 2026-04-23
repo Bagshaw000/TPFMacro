@@ -12,8 +12,9 @@ cot_obj = COTController()
 async def get_data():
     
     data = await cot_obj.get_cot_data()
+ 
     
     if data:
         return JSONResponse(status_code=200, content= data)
-    return JSONResponse(status_code=500)
+    return JSONResponse(status_code=500, content=None)
     

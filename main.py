@@ -1,11 +1,14 @@
 from fastapi import FastAPI, HTTPException
+import sys
 import os
-from src.database import db_connect
+sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from src.database.db import db_connect
 from convex import ConvexClient
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from src.cot import COT
 from src.config.config import get_doppler_env
+from src.routes import cot
 
 
 
@@ -19,7 +22,7 @@ async def lifespan(app: FastAPI):
     
 app = FastAPI(lifespan=lifespan)
 
-
+app.include_router(cot.router)
 
 
 @app.get("/health")
