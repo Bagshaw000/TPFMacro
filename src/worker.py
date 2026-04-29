@@ -24,4 +24,4 @@ class WorkerSettings:
         cron(test_cleanup,  weekday="wed", hour=23)
     ]
     
-    redis_settings = RedisSettings(host="localhost")
+    redis_settings = RedisSettings(host="redis")
