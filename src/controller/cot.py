@@ -45,6 +45,7 @@ class COTController:
                 # print("Empty") 
                 # print(await self.cot.get_latest_cot_data())
                 data = await self.cot.get_cot_data_size()
+                print(data)
                 data_list = await self.batch_get_data(data.count)
                 # print((data))
                 insert_data = await self.insert_cot_redis(data_list)
