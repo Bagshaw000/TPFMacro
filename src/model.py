@@ -9,7 +9,7 @@ class CotModel:
     
     def __init__(self):
         self.conn = db_connect()
-        pass
+       
         
     # Get the last report 
     async def get_last_report(self):
