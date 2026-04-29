@@ -5,7 +5,7 @@
 
 domianmt5.xyz {
 
-    reverse_proxy app:8000 {
+    reverse_proxy macro:8000 {
         lb_policy round_robin
 
         health_uri     /health
@@ -14,7 +14,7 @@ domianmt5.xyz {
         health_status  200
 
         transport http {
-            keepalive          30s
+            keepalive          60s
             keepalive_idle_conns 10
         }
     }
