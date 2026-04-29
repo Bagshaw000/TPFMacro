@@ -5,6 +5,8 @@ services:
       context: .
       dockerfile: Dockerfile
 
+    container_name: macro
+
     environment:
       - DOPPLER_TOKEN=${DOPPLER_TOKEN}
 
@@ -25,6 +27,7 @@ services:
   redis:
     image: redis:8.4
     command: redis-server --save 60 1 --loglevel warning
+    container_name: redis
     volumes:
       - redis_data:/data
     networks:
@@ -41,6 +44,7 @@ services:
       context: .
       dockerfile: Dockerfile
     command: arq src.worker.WorkerSettings
+    container_name: worker
     environment:
       - DOPPLER_TOKEN=${DOPPLER_TOKEN}
       
@@ -57,6 +61,7 @@ services:
     # ── Caddy: Reverse proxy + Load balancer ─────────────────────────────────
   caddy:
     image: caddy:2-alpine
+    container_name: caddy
     ports:
       - "80:80"
       - "443:443"
