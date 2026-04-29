@@ -191,4 +191,7 @@ cython_debug/
 .cursorindexingignore
 .env.local
 
+data/2006_2016.csv
+data/2006
+data/cot_fut.csv
 .csv
