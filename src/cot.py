@@ -3,7 +3,6 @@ import sys
 
 import numpy as np
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-
 import asyncio
 import json
 import logging
@@ -11,7 +10,7 @@ import math
 from typing import Optional
 import cot_reports as cot
 from pydantic import BaseModel
-from database.db import db_connect
+from src.database.db import db_connect
 from model import CotModel
 import pandas as pd
 from controller.cot import COTController
