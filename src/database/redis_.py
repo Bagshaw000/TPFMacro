@@ -8,7 +8,7 @@ class RedisConnection:
     
     def get_redis(self):
         if self.pool_instance is None:
-            redis_pool = redis.ConnectionPool( host='localhost',
+            redis_pool = redis.ConnectionPool( host='redis',
                 port=6379,
                 db=0,
                 max_connections=20,
