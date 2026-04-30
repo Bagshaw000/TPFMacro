@@ -2,11 +2,8 @@ from fastapi import FastAPI, HTTPException
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from convex import ConvexClient
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
-from src.cot import COT
-from src.config.config import get_doppler_env
 from src.routes import cot
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -32,7 +29,7 @@ app.add_middleware(
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
-    allow_headers=["*"],               # Allow all headers
+    allow_headers=["Content-Type", "Authorization", "Accept", "X-Requested-With"],               # Allow all headers
     expose_headers=["*"],
     max_age=3600,                      # Cache preflight for 1 hour
 )

@@ -12,13 +12,12 @@ domianmt5.xyz {
     
     # HEADERS - set before handling requests
     header {
-        # Security headers
-        X-Content-Type-Options  nosniff
-        X-Frame-Options         DENY
-        X-XSS-Protection        "1; mode=block"
-       # Referrer-Policy         strict-origin-when-cross-origin
-        -Server
-       
+        # Remove any Access-Control-* headers that Caddy might add
+        -Access-Control-Allow-Origin
+        -Access-Control-Allow-Methods
+        -Access-Control-Allow-Headers
+        -Access-Control-Allow-Credentials
+        -Access-Control-Max-Age
     }
     
     # OPTIONS PREFLIGHT HANDLER - MUST COME BEFORE reverse_proxy
@@ -51,10 +50,7 @@ domianmt5.xyz {
                 keepalive_idle_conns 10
             }
             
-            header_up Host {host}
-            header_up X-Real-IP {remote_host}
-            header_up X-Forwarded-For {remote_host}
-            header_up X-Forwarded-Proto {scheme}
+            header_up -Access-Control-*
         }
     }
     
