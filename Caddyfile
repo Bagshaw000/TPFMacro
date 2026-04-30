@@ -18,14 +18,7 @@ domianmt5.xyz {
         X-XSS-Protection        "1; mode=block"
         Referrer-Policy         strict-origin-when-cross-origin
         -Server
-        
-        # CORS headers
-        Access-Control-Allow-Origin "http://localhost:3000"
-        Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-        Access-Control-Allow-Headers "Content-Type, Authorization, Accept, X-API-Key"
-        Access-Control-Allow-Credentials "true"
-        Access-Control-Max-Age "3600"
-        Access-Control-Expose-Headers "Content-Length, X-Total-Count"
+       
     }
     
     # OPTIONS PREFLIGHT HANDLER - MUST COME BEFORE reverse_proxy

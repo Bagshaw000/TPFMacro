@@ -2,7 +2,6 @@ from fastapi import FastAPI, HTTPException
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from src.database.db import db_connect
 from convex import ConvexClient
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
@@ -26,7 +25,7 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",      # Next.js dev
-        "*",      # Production frontend
+          # Production frontend
         
     ],
     allow_credentials=True,
