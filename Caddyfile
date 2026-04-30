@@ -12,7 +12,7 @@ domianmt5.xyz {
     
     # HEADERS - set before handling requests
     header {
-        # Remove any Access-Control-* headers that Caddy might add
+     
         -Access-Control-Allow-Origin
         -Access-Control-Allow-Methods
         -Access-Control-Allow-Headers
