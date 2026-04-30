@@ -23,6 +23,7 @@ app.add_middleware(
     allow_origins=[
         "http://localhost:3000", 
         "https://domianmt5.xyz",
+        "http://domianmt5.xyz"
         # Next.js dev
           # Production frontend
         
