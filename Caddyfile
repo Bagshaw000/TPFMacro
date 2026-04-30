@@ -20,7 +20,30 @@ domianmt5.xyz {
     }
 
     encode gzip
+     # Handle OPTIONS requests first (before any redirect)
+    @options {
+        method OPTIONS
+    }
 
+
+     # Respond to OPTIONS directly without redirect
+    handle @options {
+        header {
+            Access-Control-Allow-Origin "http://localhost:3000"
+            Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+            Access-Control-Allow-Headers "Content-Type, Authorization"
+            Access-Control-Allow-Credentials "true"
+            Access-Control-Max-Age "3600"
+        }
+        respond 204
+    }
+    
+      # Then handle HTTP->HTTPS redirect for other requests
+    # Caddy does this automatically, but we can customize
+    tls {
+        protocols tls1.2 tls1.3
+    }
+    
     header {
         X-Content-Type-Options  nosniff
         X-Frame-Options         DENY
