@@ -49,7 +49,7 @@ domianmt5.xyz {
         @trailing_slash {
             path_regexp ^/v1/.+/$
         }
-        rewrite @trailing_slash {path}/? {path}
+        rewrite @trailing_slash {path}
         
         # Proxy to backend
         reverse_proxy macro:8000 {
