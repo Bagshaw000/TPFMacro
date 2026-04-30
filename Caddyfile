@@ -1,63 +1,102 @@
 # Caddyfile
-# Replace "your-domain.com" with your actual Contabo domain/IP
-# For bare IP: use http://your.ip.address { ... } (no auto TLS)
-# For domain: just use your-domain.com { ... } (Caddy auto-provisions TLS)
-
 domianmt5.xyz {
-
+    # LOGGING FIRST - so we see everything
+    log {
+        output stdout
+        format json
+        level INFO
+    }
     
-
+    # GZIP ENCODING - early in the chain
     encode gzip
     
-      # Then handle HTTP->HTTPS redirect for other requests
-    # Caddy does this automatically, but we can customize
-    tls {
-        protocols tls1.2 tls1.3
-    }
-
+    # HEADERS - set before handling requests
     header {
+        # Security headers
         X-Content-Type-Options  nosniff
         X-Frame-Options         DENY
         X-XSS-Protection        "1; mode=block"
         Referrer-Policy         strict-origin-when-cross-origin
         -Server
-
-         # CORS - use env var for allowed origin
-        Access-Control-Allow-Origin "*"
+        
+        # CORS headers
+        Access-Control-Allow-Origin "http://localhost:3000"
         Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-        Access-Control-Allow-Headers "*"
+        Access-Control-Allow-Headers "Content-Type, Authorization, Accept, X-API-Key"
         Access-Control-Allow-Credentials "true"
         Access-Control-Max-Age "3600"
-
+        Access-Control-Expose-Headers "Content-Length, X-Total-Count"
     }
-
-    @preflight method OPTIONS
+    
+    # OPTIONS PREFLIGHT HANDLER - MUST COME BEFORE reverse_proxy
+    @preflight {
+        method OPTIONS
+    }
     handle @preflight {
-        header {
-            Access-Control-Allow-Origin "*"
-            Access-Control-Allow-Methods "*"
-            Access-Control-Allow-Headers "*"
-        }
         respond 204
     }
-
-    reverse_proxy macro:8000 {
-        lb_policy round_robin
-
-        health_uri     /health
-        health_interval 10s
-        health_timeout  5s
-        health_status  200
-
-        transport http {
-            keepalive          60s
-            keepalive_idle_conns 10
+    
+    # HEALTH CHECK ENDPOINT - handle separately if needed
+    handle /health {
+        reverse_proxy macro:8000 {
+            health_uri /health
         }
     }
-
-    log {
-        output stdout
-        format json
-        level  INFO
+    
+    # API ROUTES - handle trailing slashes properly
+    handle /v1/* {
+        # Remove trailing slash for API calls
+        @trailing_slash {
+            path_regexp ^/v1/.+/$
+        }
+        rewrite @trailing_slash {path}/? {path}
+        
+        # Proxy to backend
+        reverse_proxy macro:8000 {
+            lb_policy round_robin
+            
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+            health_status 200
+            
+            transport http {
+                keepalive 60s
+                keepalive_idle_conns 10
+            }
+            
+            # Forward headers
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    
+    # DEFAULT HANDLER - catch all other routes
+    handle {
+        reverse_proxy macro:8000 {
+            lb_policy round_robin
+            
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+            health_status 200
+            
+            transport http {
+                keepalive 60s
+                keepalive_idle_conns 10
+            }
+            
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    
+    # TLS configuration (Caddy handles this automatically)
+    tls {
+        protocols tls1.2 tls1.3
     }
 }
