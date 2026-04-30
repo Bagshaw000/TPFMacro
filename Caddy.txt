@@ -61,3 +61,35 @@ domianmt5.xyz {
         level  INFO
     }
 }
+
+   
+    # API ROUTES - handle trailing slashes properly
+    handle /v1/* {
+        # Remove trailing slash for API calls
+      #  @trailing_slash {
+       #     path_regexp ^/v1/.+/$
+        #}
+        #rewrite @trailing_slash {path}
+        
+        # Proxy to backend
+        reverse_proxy macro:8000 {
+            lb_policy round_robin
+            
+            health_uri /health
+            health_interval 10s
+            health_timeout 5s
+            health_status 200
+            
+            transport http {
+                keepalive 60s
+                keepalive_idle_conns 10
+            }
+            
+            # Forward headers
+            header_up Host {host}
+            header_up X-Real-IP {remote_host}
+            header_up X-Forwarded-For {remote_host}
+            header_up X-Forwarded-Proto {scheme}
+        }
+    }
+    
