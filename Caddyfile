@@ -27,6 +27,24 @@ domianmt5.xyz {
         X-XSS-Protection        "1; mode=block"
         Referrer-Policy         strict-origin-when-cross-origin
         -Server
+
+         # CORS - use env var for allowed origin
+        Access-Control-Allow-Origin "*"
+        Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS"
+        Access-Control-Allow-Headers "*"
+        Access-Control-Allow-Credentials "true"
+        Access-Control-Max-Age "3600"
+
+    }
+
+    @preflight method OPTIONS
+    handle @preflight {
+        header {
+            Access-Control-Allow-Origin "*"
+            Access-Control-Allow-Methods "*"
+            Access-Control-Allow-Headers "*"
+        }
+        respond 204
     }
 
     log {

@@ -9,6 +9,7 @@ from contextlib import asynccontextmanager
 from src.cot import COT
 from src.config.config import get_doppler_env
 from src.routes import cot
+from fastapi.middleware.cors import CORSMiddleware
 
 
 
@@ -21,6 +22,19 @@ async def lifespan(app: FastAPI):
     yield
     
 app = FastAPI(lifespan=lifespan)
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[
+        "http://localhost:3000",      # Next.js dev
+        "https://yourdomain.com",      # Production frontend
+        "https://yourfrontend.vercel.app",
+    ],
+    allow_credentials=True,
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],
+    allow_headers=["*"],               # Allow all headers
+    expose_headers=["*"],
+    max_age=3600,                      # Cache preflight for 1 hour
+)
 
 app.include_router(cot.router)
 
