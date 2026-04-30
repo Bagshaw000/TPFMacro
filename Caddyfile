@@ -34,25 +34,22 @@ domianmt5.xyz {
             health_uri /health
         }
     }
- 
-    # DEFAULT HANDLER - catch all other routes
-    handle {
-        reverse_proxy macro:8000 {
-            lb_policy round_robin
-            
-            health_uri /health
-            health_interval 10s
-            health_timeout 5s
-            health_status 200
-            
-            transport http {
-                keepalive 60s
-                keepalive_idle_conns 10
-            }
-            
-            header_up -Access-Control-*
+    
+    reverse_proxy macro:8000 {
+        lb_policy round_robin
+
+        health_uri     /health
+        health_interval 10s
+        health_timeout  5s
+        health_status  200
+
+        transport http {
+            keepalive          60s
+            keepalive_idle_conns 10
         }
     }
+    # DEFAULT HANDLER - catch all other routes
+ 
     
     # TLS configuration (Caddy handles this automatically)
     tls {
