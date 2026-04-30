@@ -24,7 +24,9 @@ app = FastAPI(lifespan=lifespan)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:3000",      # Next.js dev
+        "http://localhost:3000", 
+        "https://domianmt5.xyz",
+        # Next.js dev
           # Production frontend
         
     ],
