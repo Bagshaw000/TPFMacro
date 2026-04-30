@@ -26,8 +26,8 @@ app.add_middleware(
     CORSMiddleware,
     allow_origins=[
         "http://localhost:3000",      # Next.js dev
-        "https://yourdomain.com",      # Production frontend
-        "https://yourfrontend.vercel.app",
+        "*",      # Production frontend
+        
     ],
     allow_credentials=True,
     allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"],

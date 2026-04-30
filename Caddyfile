@@ -5,45 +5,16 @@
 
 domianmt5.xyz {
 
-    reverse_proxy macro:8000 {
-        lb_policy round_robin
-
-        health_uri     /health
-        health_interval 10s
-        health_timeout  5s
-        health_status  200
-
-        transport http {
-            keepalive          60s
-            keepalive_idle_conns 10
-        }
-    }
+    
 
     encode gzip
-     # Handle OPTIONS requests first (before any redirect)
-    @options {
-        method OPTIONS
-    }
-
-
-     # Respond to OPTIONS directly without redirect
-    handle @options {
-        header {
-            Access-Control-Allow-Origin "http://localhost:3000"
-            Access-Control-Allow-Methods "GET, POST, PUT, DELETE, PATCH, OPTIONS"
-            Access-Control-Allow-Headers "Content-Type, Authorization"
-            Access-Control-Allow-Credentials "true"
-            Access-Control-Max-Age "3600"
-        }
-        respond 204
-    }
     
       # Then handle HTTP->HTTPS redirect for other requests
     # Caddy does this automatically, but we can customize
     tls {
         protocols tls1.2 tls1.3
     }
-    
+
     header {
         X-Content-Type-Options  nosniff
         X-Frame-Options         DENY
@@ -68,6 +39,20 @@ domianmt5.xyz {
             Access-Control-Allow-Headers "*"
         }
         respond 204
+    }
+
+    reverse_proxy macro:8000 {
+        lb_policy round_robin
+
+        health_uri     /health
+        health_interval 10s
+        health_timeout  5s
+        health_status  200
+
+        transport http {
+            keepalive          60s
+            keepalive_idle_conns 10
+        }
     }
 
     log {
