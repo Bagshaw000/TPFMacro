@@ -118,111 +118,7 @@ class COTController:
         except Exception as e:
             logging.error("Error interpreting cot data")     
     
-    # # This function calculates the pct change for different intervals
-    # async def calculate_all_change(self, data:dict):
-    #     try:
-    #         fields = ['Large_Spec_Net', 'Commercial_Net', 'Dealer_Net', 
-    #               'Asset_Mgr_Net', 'Lev_Money_Net', 'Other_Rept_Net']
-            
-    #         result = dict()
-    #         max_weeks = 52
-            
-    #         for instrument, instrument_data in data.items():
-    #             # If no data is found skip
-    #             if not instrument_data:
-    #                 continue
-                
-    #             # Transpose the data to make the date the index and sort based on the date
-    #             df = pd.DataFrame(instrument_data).T
-    #             df.index = pd.to_datetime(df.index)
-    #             df = df.sort_index()
-                
-                
-    #             for field in fields:
-    #                 if field in df.columns:
-    #                     df[field] = pd.to_numeric(df[field], errors="coerce")
-                        
-    #             df = df.ffill()
-    #             # Create date range  for all date
-               
-    #         #    Limit to the last 52 weeks
-            
-    #             if len(df) > max_weeks:
-    #                 df = df.tail(max_weeks)
-                
-                
-    #             # Calculate shifts for different periods
-    #             periods = {
-    #                 '1_month': 4,    # ~4 weeks
-    #                 '3_month': 12,   # ~12 weeks
-    #                 '6_month': 24,   # ~24 weeks
-    #                 '1_year': 52     # ~52 weeks
-    #             }
-                
-    
-                
-                
-    #             instrument_results = {}
-    #             # Loop through all the selected fields in the dataframe
-    #             for field in fields:
-    #                 if field not in df.columns:
-    #                     continue
-                    
-    #                 field_results = {}
-                    
-    #                 # Loop through all the periods
-    #                 for period_name, weeks in periods.items():
-                        
-    #                     # Get data in the that time interval
-    #                     shifted = df[field].shift(weeks)
-                        
-    #                     mask = (shifted.notna()) & (shifted != 0)
-                        
-    #                      # Calculate percentage changes
-    #                     pct_changes = ((df[field] - shifted) / abs(shifted)) * 100
-    #                     pct_changes = pct_changes[mask].round(2)
-                        
-    #                     # Filter to original dates only
-    #                     period_data = {}
-    #                     for date, value in pct_changes.items():
-    #                         if date in df.index:  # Only original data points
-    #                             period_data[str(date.date())] = value                        
-
-    #                     # Limit the amount of data by the last 52 weeks
-    #                     if period_data:
-    #                         if period_name == "1_month":
-    #                             sliced_dict = list(period_data.items())
-                                
-    #                             field_results[period_name] = dict(sliced_dict[-52:])
-                            
-    #                         if period_name == "3_month":
-    #                             sliced_dict = list(period_data.items())
-                                
-    #                             field_results[period_name] = dict(sliced_dict[-18:])
-                                
-    #                         if period_name == "6_month":
-    #                             sliced_dict = list(period_data.items())
-                                
-    #                             field_results[period_name] = dict(sliced_dict[-9:])
-                                
-    #                         if period_name == "1_year":
-    #                             sliced_dict = list(period_data.items())
-                                
-    #                             field_results[period_name] = dict(sliced_dict[-5:])
-                            
-                           
-                        
-            
-    #                 if field_results:
-    #                     instrument_results[field] = field_results
-                
-    #             result[instrument] = instrument_results
-    #             data[instrument]["pct_change"] = result[instrument]
-         
-    #         return data
-
-    #     except Exception as e:
-    #         logging.error(f"Error getting data : {e}", exc_info=True)
+   
     
     async def new_calculate_all_change(self, data:dict):
         try:
@@ -317,33 +213,7 @@ class COTController:
             return data
         except Exception as e:
             logging.error(f"Error getting data : {e}", exc_info=True)
-    # # async def clean_data(self, )
-    # async def convert_redis_dataframe(self,asset_list:list,asset_cls:str)  :
-    #     try:
-    #         # print(asset_cls)
-    #         # print(asset_list)
-    #         # pipeline = self.redis.pipeline
-    #         df = dict()
-    #         for asset in asset_list:
-    #             temp_dict = {}
-               
-    #             data = list(self.redis.keys(f"cot_ttf:{asset_cls}:{asset}:*"))
-    #             data.sort(reverse=True)
-                
-    #             for key in data[:53]:
-    #                 date_key = key.split(":")
-    #                 hash_data = self.redis.hgetall(key)
-                    
-    #                 if hash_data:
-    #                      temp_dict[date_key[-1]] = hash_data
-                    
-    #             if temp_dict:  # Filters out assets with no data
-    #                 df[asset] = temp_dict   
-                    
-                    
-    #         return df
-    #     except Exception as e:
-    #         logging.error(f"Converting redis to dataframe", exc_info=True)     
+    
     
     async def new_covert_redis_dataframe(self, asset_list:list, asset_cls:str):
         try:
@@ -358,16 +228,6 @@ class COTController:
                 for key in self.redis.scan_iter(match=pattern,count=1000):
                     all_keys.append(key)
 
-                
-                # while True:
-                #     cursor, batch = await self.redis.scan(
-                #         cursor=cursor,
-                #         match=pattern,
-                #         count=1000
-                #     )
-                #     all_keys.extend(batch)
-                #     if cursor == 0:
-                #         break
                     
                 if not all_keys:
                     return None
@@ -404,7 +264,6 @@ class COTController:
          
             
             # Map all assets to its corresponding data
-            # df = {asset: data for asset, data in results if data is not None}
             df = dict()
             for result in results:
                 if result is not None:
