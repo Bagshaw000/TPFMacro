@@ -9,10 +9,10 @@ class RedisConnection:
     
     def get_redis(self):
         if self.pool_instance is None:
-            redis_pool = redis.ConnectionPool( host='redis',
+            redis_pool = redis.ConnectionPool( host='localhost',
                 port=6379,
                 db=0,
-                max_connections=20,
+                max_connections=50,
                 decode_responses=True,
                 retry_on_timeout=True,
                 health_check_interval=30)
