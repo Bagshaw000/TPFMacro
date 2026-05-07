@@ -36,4 +36,3 @@ def get_doppler_env():
     
     return doppler_secret()
 
-print(doppler_secret())

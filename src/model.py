@@ -48,7 +48,7 @@ class CotModel:
             
             response = self.conn.table("cot_ttf").select("*",count="exact").order("Report_Date_as_YYYY_MM_DD", desc=True).range(start,end).execute()
             
-            return response
+            return response 
         except Exception as e:
             logging.error(f"Error returning the latest cot data : {e}")
             

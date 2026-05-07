@@ -478,7 +478,7 @@ class COT:
         except Exception as e:
             logging.error(f'Error updating cot data : {e}', exc_info=True)
             
-
+    
 
     
         

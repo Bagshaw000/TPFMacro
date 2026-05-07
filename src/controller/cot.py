@@ -45,7 +45,7 @@ class COTController:
                 # print("Empty") 
                 # print(await self.cot.get_latest_cot_data())
                 data = await self.cot.get_cot_data_size()
-                print(data)
+               
                 data_list = await self.batch_get_data(data.count)
                 # print((data))
                 insert_data = await self.insert_cot_redis(data_list)
@@ -233,11 +233,11 @@ class COTController:
             df = dict()
             for asset in asset_list:
                 temp_dict = {}
-                # df[asset] = {}
-                data = self.redis.keys(f"cot_ttf:{asset_cls}:{asset}:*")
-                # print(data)
+               
+                data = list(self.redis.keys(f"cot_ttf:{asset_cls}:{asset}:*"))
+                data.sort(reverse=True)
                 
-                for key in data:
+                for key in data[:53]:
                     date_key = key.split(":")
                     hash_data = self.redis.hgetall(key)
                     
@@ -318,9 +318,47 @@ class COTController:
             
         except Exception as e:
             logging.error(f"Error inserting into redis data : {e}",exc_info=True)
+    
+    # # This function cleans the redis data from  
+    # async def clear_redis(self):
+    #     try:
+    #         data_obj = dict()
+    #         with open('data/instr.json', 'r') as f:
+    #             data = json.load(f)
+                
+    #         for category, items in data.items():
+    #             data_obj[category] = set(items)
             
+            
+    #         data_keys = list(set(data_obj.keys()))   
+    #         # print(data_keys)
+            
+    #         if data_obj is not {}:
+    #             for category , items in data_obj.items():
+    #                 # print(catergory)
+    #                 # print(items)
+    #                 for symbol in items:
+    #                     print(symbol)
+                        
+    #                     pattern = f"cot_ttf:{category}:{symbol}:*"
+                        
+    #                     data = list(self.redis.scan_iter(pattern))
+    #                     data.sort(reverse=True)
+    #                     if len(data) == 0: 
+    #                         continue
+                            
+    #                     # dates = [k in data]
+                                                                        
+    #                     print(data[:53])
+    #                     pass
+                
+            
+            
+    #     except Exception as e:
+    #         logging.error(f"", exc_info=True)
 
-
+# test = COTController()
+# asyncio.run(test.clear_redis())
 
 # import pandas as pd
 
