@@ -1,7 +1,3 @@
-import asyncio
-from collections.abc import AsyncIterable
-import json
-import logging
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -10,7 +6,10 @@ from fastapi import APIRouter,WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
 from fastapi.sse import EventSourceResponse
 from fastapi.concurrency import run_in_threadpool
-
+import asyncio
+from collections.abc import AsyncIterable
+import json
+import logging
 
 router = APIRouter(prefix="/v1/symbol")
 symbol_obj = MarketOverview()
