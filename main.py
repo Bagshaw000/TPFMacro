@@ -4,7 +4,7 @@ import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
-from src.routes import cot
+from src.routes import cot,symbol
 from fastapi.middleware.cors import CORSMiddleware
 
 
@@ -36,7 +36,7 @@ app.add_middleware(
 )
 
 app.include_router(cot.router)
-
+app.include_router(symbol.router)
 
 @app.get("/health")
 async def read_root():

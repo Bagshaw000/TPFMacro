@@ -6,7 +6,7 @@ import logging
 from dopplersdk import DopplerSDK
 from dotenv import load_dotenv
 from custom_types.config import ConfigType
-import os
+
 
 
 def doppler_secret()->ConfigType:
@@ -23,7 +23,9 @@ def doppler_secret()->ConfigType:
         
         return ConfigType(
             supabase_key= doppler.secrets.get(project="tpf_macro", config="dev",name="SUPABASE_KEY").value['raw'],
-            supabase_url =  doppler.secrets.get(project="tpf_macro", config="dev",name="SUPABASE_URL").value['raw']
+            supabase_url =  doppler.secrets.get(project="tpf_macro", config="dev",name="SUPABASE_URL").value['raw'],
+            news_api= doppler.secrets.get(project="tpf_macro", config="dev",name="NEWS_API").value['raw'],
+            news_key= doppler.secrets.get(project="tpf_macro", config="dev",name="NEWS_KEY").value['raw']
         )
         
         
