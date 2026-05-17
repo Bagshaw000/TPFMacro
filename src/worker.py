@@ -23,7 +23,7 @@ except RuntimeError:
         asyncio.set_event_loop(loop)
         
         
-REDIS_SETTINGS = RedisSettings()
+# REDIS_SETTINGS = RedisSettings(host="redis")
 cot_model = COT()
 market_ovw = MarketOverview()
 
