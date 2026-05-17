@@ -23,7 +23,7 @@ except RuntimeError:
         asyncio.set_event_loop(loop)
         
         
-# REDIS_SETTINGS = RedisSettings(host="redis")
+
 cot_model = COT()
 market_ovw = MarketOverview()
 
@@ -50,5 +50,7 @@ class WorkerSettings:
         cron(get_events,weekday='sat', hour=23, unique=True,
             run_at_startup=False)
     ]
+    
+    redis_settings = RedisSettings(host='redis')
     
     
