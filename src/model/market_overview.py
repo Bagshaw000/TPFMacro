@@ -84,7 +84,7 @@ class MarketOverview:
             curr_tru = await asyncio.gather(*true_task)
             # print(key_exists)
         except Exception as e:
-            pass
+            logging.error(f"Error in currency pipeline {e}", exc_info=True)
     
     async def get_currency_ytd(self, ticker:str,pattern:str):
         try:
@@ -95,12 +95,7 @@ class MarketOverview:
                 one_year_ago = datetime.now() - relativedelta(years=1)
                 start = one_year_ago.strftime('%Y-%m-%d')
                 
-                # session = requests.Session()
-                # session.headers.update({
-                #     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                #     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                #     'Accept-Language': 'en-US,en;q=0.5',
-                # })
+            
                 
                 symbol_df = pd.DataFrame(yf.Ticker(format_ticker).history(interval='1d',repair=True, start=start))
                 
@@ -386,6 +381,7 @@ class MarketOverview:
 
     async def symbol_snapshot(self,ticker:str, category:str):
         try:
+            # Add a semaphore
             #Ticker pattern
             ticker_key = f"overview:{category}:{ticker}"
          
@@ -642,7 +638,7 @@ class MarketOverview:
           
             # Use multithreading
                 
-            with ThreadPoolExecutor(max_workers=3) as executor:
+            with ThreadPoolExecutor(max_workers=5) as executor:
                 loop = asyncio.get_running_loop()
                 
                 task1 = loop.run_in_executor(executor,atr, df[-90:])
@@ -651,7 +647,7 @@ class MarketOverview:
                 
                 result_corr, result_vol,result_ema= await asyncio.gather(task1, task2, task3)
             
-            return   result_corr, result_vol, result_ema
+            return  result_corr, result_vol, result_ema
         except Exception as e:
             logging.error(f"Error calculating technical signal {e}", exc_info=True)
 

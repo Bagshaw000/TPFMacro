@@ -1,3 +1,5 @@
+import asyncio
+
 from fastapi import FastAPI, HTTPException
 import sys
 import os
@@ -6,14 +8,16 @@ from dotenv import load_dotenv
 from contextlib import asynccontextmanager
 from src.routes import cot,symbol
 from fastapi.middleware.cors import CORSMiddleware
+from model.market_overview import MarketOverview
 
-
+market_overview = MarketOverview()
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     
     load_dotenv()
+    asyncio.gather(market_overview.get_currency(), market_overview.get_economic_event()) 
     
     yield
     
