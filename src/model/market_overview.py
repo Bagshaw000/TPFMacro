@@ -16,7 +16,7 @@ from database.redis_ import RedisConnection
 from config.config import get_doppler_env
 
 
-sem = asyncio.Semaphore(10)
+sem = asyncio.Semaphore(30)
 class MarketOverview:
     
     def __init__(self):
@@ -54,15 +54,12 @@ class MarketOverview:
                 'USDSEK=X', 'USDNOK=X', 'USDMXN=X', 'USDSGD=X',
                 'USDTRY=X', 'USDZAR=X', 'USDPLN=X', 'USDHUF=X'
             )
-            tickers_string = " ".join(all_pairs)  
-            # symbol_df =pd.DataFrame(yf.Tickers(tickers_string).history(period="ytd",repair=True,))
-            
-            # filter_df = symbol_df
+
             
             pipeline = self.redis.pipeline()
             pattern = f"overview:currency:"
             currency_keys= [f"{pattern}{symbol.replace("=X",'')}" for symbol in all_pairs]
-            # print(currency_keys)
+     
             
            
             # Check if the keys exist
@@ -79,10 +76,10 @@ class MarketOverview:
             task = [self.get_currency_ytd(key.split(":")[-1], pattern) for key in false_keys]
             
             true_task =  [self.get_currency_last_entry(key.split(":")[-1], pattern) for key in true_keys]
-            # print(true_keys)
+           
             curr = await asyncio.gather(*task)
             curr_tru = await asyncio.gather(*true_task)
-            # print(key_exists)
+          
         except Exception as e:
             logging.error(f"Error in currency pipeline {e}", exc_info=True)
     
@@ -123,23 +120,11 @@ class MarketOverview:
     async def get_currency_last_entry(self,ticker:str, pattern:str):
         try:
             async with sem:
-                # self.redis.delete("overview:currency:*")
-                # keys_to_delete = list(self.redis.scan_iter("overview:currency:*"))
-                
-                # if keys_to_delete:
-                #   self.redis.unlink(*keys_to_delete)
+            
                 
                 format_ticker = f'{ticker}=X'
                 keys = [ field async for field, value in  self.aioredis.hscan_iter(f"overview:currency:{ticker}")]
                 sorted_keys = sorted(keys)
-                print(sorted_keys[-1])
-                # Get the most recent days
-                # session = requests.Session()
-                # session.headers.update({
-                #     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-                #     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
-                #     'Accept-Language': 'en-US,en;q=0.5',
-                # })
                 
                 
              

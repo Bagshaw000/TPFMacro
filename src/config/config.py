@@ -16,7 +16,10 @@ def doppler_secret()->ConfigType:
         token = os.getenv("DOPPLER_TOKEN")
         
         if not token:
-            raise RuntimeError(f"Failed to fetch Doppler secrets: {e}")
+            
+            logging.info(f"Failed to fetch Doppler secrets")
+            raise RuntimeError(f"Failed to fetch Doppler secrets")
+            
         
         doppler = DopplerSDK()
         doppler.set_access_token(token)
@@ -25,12 +28,17 @@ def doppler_secret()->ConfigType:
             supabase_key= doppler.secrets.get(project="tpf_macro", config="dev",name="SUPABASE_KEY").value['raw'],
             supabase_url =  doppler.secrets.get(project="tpf_macro", config="dev",name="SUPABASE_URL").value['raw'],
             news_api= doppler.secrets.get(project="tpf_macro", config="dev",name="NEWS_API").value['raw'],
-            news_key= doppler.secrets.get(project="tpf_macro", config="dev",name="NEWS_KEY").value['raw']
+            news_key= doppler.secrets.get(project="tpf_macro", config="dev",name="NEWS_KEY").value['raw'],
+            db_server = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_SERVER").value['raw'],
+            db_port = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_PORT").value['raw'],
+            db_name = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_NAME").value['raw'],
+            db_password = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_PASSWORD").value['raw'],
+            db_user = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_USER").value['raw']
         )
         
         
     except Exception as e:
-        logging.error(f"Error loading doppler secret")
+        logging.error(f"Error loading doppler secret: {e}")
         
 
 @lru_cache     

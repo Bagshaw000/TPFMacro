@@ -1,7 +1,5 @@
 import os
 import sys
-
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 import numpy as np
@@ -11,35 +9,36 @@ import math
 from typing import Optional
 import cot_reports as cot
 from pydantic import BaseModel
-from src.database.db import db_connect
-from model.cot import CotModel
+# from src.database.db import db_connect
+from model.cot import CotModel, CotModell
 import pandas as pd
 from controller.cot import COTController
-from custom_types.cot import CFTCData
+from custom_types.cot import CFTCData, CotData
 from datetime import datetime, date
 import re
 
 class COT:
     
     def __init__(self):
-        self.db = db_connect()
+        # self.db = db_connect()
         self.cot_ctrl = COTController()
-        self.cot_model = CotModel()
+        self.cot_model = CotModell()
         
     async def get_cot(self):
         try:
             data_exist = await self.cot_model.get_last_report()
             
-            if data_exist.count:
-                pass
+            if data_exist != None:
+                
+                return 
             
-            if not data_exist.count:
+            
              
                 
-                cot_data = await self.all_data()
-                
-              
-                return cot_data
+            cot_data = await self.all_data()
+            
+            
+            return cot_data
             
         except Exception as e:
             logging.error(f'Error getting cot report : {e}')
@@ -97,6 +96,9 @@ class COT:
            
             
             instrument_list:list =[]
+            
+            # if merged == []:
+            #     return 
            
             for index, row in load_df.iterrows():
                 # Determin market type
@@ -400,8 +402,12 @@ class COT:
             updated_cot_list = list()
             
             # Create a hashmap of all data with asset name
-            for element in last_entry.data:
-                instrument_map[element['Market_and_Exchange_Names']] = element
+            
+            if last_entry == None:
+                return 
+            
+            for element in last_entry:
+                instrument_map[element.market_and_exchange_names] = element
                 
            
             # Get data list of all instument
@@ -420,14 +426,17 @@ class COT:
             # Get the cot report for the current year
             df:pd.DataFrame = cot.cot_year(year = year, cot_report_type = 'traders_in_financial_futures_fut')
 
-            
+            if df.empty:
+                return 
             # loop through the dataframe
             for index, row  in df.iterrows():
                 # Determine market class and format the market name
                 instrument = row['Market_and_Exchange_Names'].split(' - ')
                 
+                if not data and not merged and len(instrument) < 2:
+                    return
                 # Filters assets we track
-                asset_cls,asset_name = await self.determine_market(instrument[0],merged,data)
+                asset_cls,asset_name = await self.determine_market(str(instrument[0]),list(merged),dict(data))
                 
                 if asset_cls == None or asset_name == None:
                     continue
@@ -451,12 +460,12 @@ class COT:
                 cleaned_row['Market_and_Exchange_Names']= asset_name
                 cleaned_row['Market']= asset_cls
                     
-                new_cftc = CFTCData(**cleaned_row).model_dump()
+                new_cftc = CFTCData(**cleaned_row)
             
                 # Check if the is the cot report is database
                 if asset_name in instrument_map.keys():
                     
-                    element_date = datetime.fromisoformat(new_cftc["Report_Date_as_YYYY_MM_DD"])
+                    element_date = datetime.fromisoformat(str(new_cftc.Report_Date_as_YYYY_MM_DD))
                     last_element_date = datetime.fromisoformat(instrument_map[asset_name]["Report_Date_as_YYYY_MM_DD"])
 
                     # Get latest cot data 
@@ -469,12 +478,32 @@ class COT:
                 df_unique = dup_df.drop_duplicates(subset=['Market_and_Exchange_Names', 'Report_Date_as_YYYY_MM_DD'],keep="last").replace({np.nan: None, np.inf: None, -np.inf: None})
                 unique_dicts = df_unique.to_dict('records')
                 
-                cftc_models = [CFTCData(**dict_item).model_dump() for dict_item in unique_dicts]
+                # Resolve the duplicate 
+
+                
+                async def create_cftc_model(dict_item):
+                    """Create CFTCData model"""
+                    return CFTCData(**dict_item).model_dump()
+                
+                async def create_cot_model(dict_item):
+                    """Create CotData model"""
+                    return CotData(**dict_item).model_dump()
+    
+                # cftc_models = [CFTCData(**dict_item).model_dump() for dict_item in unique_dicts]
+                # cot_models = [CotData(**dict_item).model_dump() for dict_item in unique_dicts]
          
                 
-                await self.cot_model.update_ttf_report(cftc_models)
-                await self.cot_ctrl.insert_cot_redis(cftc_models)
-                print("Done")
+                # await self.cot_model.update_ttf_report(cot_models)
+                # await self.cot_ctrl.insert_cot_redis(cftc_models)
+                cftc_tasks = [create_cftc_model(item) for item in unique_dicts]
+                cot_tasks = [create_cot_model(item) for item in unique_dicts]
+                
+                # Run both sets of tasks in parallel
+                cftc_results, cot_results = await asyncio.gather(
+                    asyncio.gather(*cftc_tasks),
+                    asyncio.gather(*cot_tasks)
+                )
+                logging.info("Finished updating Cot Data")
              
         except Exception as e:
             logging.error(f'Error updating cot data : {e}', exc_info=True)

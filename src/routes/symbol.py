@@ -8,11 +8,14 @@ from fastapi.sse import EventSourceResponse
 from fastapi.concurrency import run_in_threadpool
 import asyncio
 from collections.abc import AsyncIterable
+from src.model.nat import NatsService, nats_router
 import json
 import logging
+import yfinance as yf
 
 router = APIRouter(prefix="/v1/symbol")
 symbol_obj = MarketOverview()
+broker = NatsService.get_broker()
 
 
 
@@ -63,6 +66,40 @@ async def get_symbol(category: str, pair: str):
     except Exception as e:
         logging.error(f"Error in stream for {pair} {category} : {e}", exc_info=True)
         
+
+def message_handler(message):
+    print("Received message:", message)   
+        
+async def ingest_symbol():
+    async with yf.AsyncWebSocket() as ws:
+        await ws.subscribe([ 
+                'EURUSD=X', 'USDJPY=X', 'GBPUSD=X', 'USDCHF=X', 
+                'AUDUSD=X', 'USDCAD=X', 'NZDUSD=X',
+              
+                'EURGBP=X', 'EURJPY=X', 'EURCHF=X', 'EURAUD=X', 
+                'EURCAD=X', 'EURNZD=X', 'EURSEK=X', 'EURNOK=X',
+       
+                'GBPJPY=X', 'AUDJPY=X', 'CADJPY=X', 'CHFJPY=X', 'NZDJPY=X',
+           
+                'GBPCHF=X', 'GBPAUD=X', 'GBPCAD=X', 'GBPNZD=X',
+            
+                'CHFAUD=X', 'CHFCAD=X',
+          
+                'AUDNZD=X', 'AUDCAD=X', 'AUDCHF=X',
+                'NZDCAD=X', 'NZDCHF=X',
+         
+                'USDSEK=X', 'USDNOK=X', 'USDMXN=X', 'USDSGD=X',
+                'USDTRY=X', 'USDZAR=X', 'USDPLN=X', 'USDHUF=X'])
+        
+        live_tick = await ws.listen()
+        
+        await nats_router.broker.publish(subject="symbol.ingested",  # Subject/topic
+                            message=live_tick,        # The actual data payload
+                            )
+
+# loop= asyncio.get_running_loop()  
+# loop.create_task(ingest_symbol())
+     
         
 # @router.get("/")
 # async def get_data():

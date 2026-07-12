@@ -21,18 +21,18 @@ FROM python:3.13-slim
 WORKDIR /macro
 
 # Install Doppler CLI + runtime deps
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    libpq5 \
-    curl \
-    ca-certificates \
-    gnupg \  
-    && rm -rf /var/lib/apt/lists/*
+# RUN apt-get update && apt-get install -y --no-install-recommends \
+#     libpq5 \
+#     curl \
+#     ca-certificates \
+#     gnupg \  
+#     && rm -rf /var/lib/apt/lists/*
 
-# # Install Doppler CLI using their official install script (always up to date)
-# RUN curl -Ls --tlsv1.2 --proto "=https" \
-#     https://cli.doppler.com/install.sh | sh
-# # Add Doppler to PATH (it installs to /root/.doppler/bin/doppler by default)
-# ENV PATH="/root/.doppler/bin:${PATH}"
+# # # Install Doppler CLI using their official install script (always up to date)
+# # RUN curl -Ls --tlsv1.2 --proto "=https" \
+# #     https://cli.doppler.com/install.sh | sh
+# # # Add Doppler to PATH (it installs to /root/.doppler/bin/doppler by default)
+# # ENV PATH="/root/.doppler/bin:${PATH}"
 
 # Install runtime dependencies AND Doppler CLI
 RUN apt-get update && apt-get install -y --no-install-recommends \

@@ -37,6 +37,8 @@ async def currency_snapshot(ctx):
     
 async def get_events(ctx):
     await market_ovw.get_economic_event()
+    
+
 
 class WorkerSettings:
     

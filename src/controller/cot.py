@@ -7,7 +7,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.redis_ import RedisConnection
-from model.cot import CotModel
+from model.cot import CotModell
 import pandas as pd
 import numpy as np
 
@@ -15,7 +15,7 @@ class COTController:
     
     def __init__(self):
         self.redis = RedisConnection().get_redis()
-        self.cot = CotModel() 
+        self.cot = CotModell() 
         
     #Get Cot data 
     async def get_cot_data(self):
@@ -38,28 +38,46 @@ class COTController:
             
             data_keys = list(data_obj.keys())
 
-            # Check if we have existing records
-       
+            # Check if we have existing records not in redis
             if not check_cot:
                 
-                # print("Empty") 
-                # print(await self.cot.get_latest_cot_data())
+                # Get the size of cot data from database
                 data = await self.cot.get_cot_data_size()
-               
-                data_list = await self.batch_get_data(data.count)
+                
+                # If no data is returned then stop operation
+                if not data:
+                    logging.info("Getting cot data size returns None")
+                    return
+                
+                # Then we process the data in 1000 batch size
+                data_list = await self.batch_get_data(data)
                 # print((data))
+                
+                # If batch data is not returned then stop operations
+                if not data_list:
+                    logging.info("data list is empty")
+                    return
+                
+                # Update redis records
                 insert_data = await self.insert_cot_redis(data_list)
                 
-                if not insert_data[0]:
-                    return {}
+                
+                if not insert_data:
+                    logging.info("Failed to update redis cot data")
+                    return 
             
           
-                
+            # If data is our redis convert data to dataframe for further processing
             currency_data,indices_data,financial_data,crypto_data =await asyncio.gather( self.new_covert_redis_dataframe(data_obj[data_keys[0]],data_keys[0]),self.new_covert_redis_dataframe(data_obj[data_keys[1]],data_keys[1]),self.new_covert_redis_dataframe(data_obj[data_keys[2]],data_keys[2]),self.new_covert_redis_dataframe(data_obj[data_keys[3]],data_keys[3]))
-                
+            
+            # Ensure all asset class converts properly
+            if not currency_data or not indices_data or not financial_data or not crypto_data: 
+                logging.info("Error in coverting to redis")
+                return
+            
+            # Calculate the percentage change for all asset classes
             cur_pct,ind_pct,fin_pct,crypt_pct = await asyncio.gather(self.new_calculate_all_change(currency_data),self.new_calculate_all_change(indices_data),self.new_calculate_all_change(financial_data),self.new_calculate_all_change(crypto_data)) 
-        
-            await self.interpret_pct_change(cur_pct,"Currency")
+
             
             data = {
                 "Currency":cur_pct,
@@ -69,26 +87,13 @@ class COTController:
             }  
             
             return data
-            # if check_cot:
-       
-            #     # print("Not empty")
-            #     # Filter by symbol and return the last 52 weeks
-            #     # crypto_data = self.redis.keys("cot_ttf:Crypto:*")  # or "cot_ttf/Crypto"
-            #     # currency_data = self.redis.hgetall("cot_ttf:Currency")
-            #     # financial_data = self.redis.hgetall("cot_ttf:Financial")
-            #     # indices_data = self.redis.hgetall("cot_ttf:Indices")
-                
-            #     currency_data,indices_data,financial_data,crypto_data =await asyncio.gather( self.convert_redis_dataframe(data_obj[data_keys[0]],data_keys[0]),self.convert_redis_dataframe(data_obj[data_keys[1]],data_keys[1]),self.convert_redis_dataframe(data_obj[data_keys[2]],data_keys[2]),self.convert_redis_dataframe(data_obj[data_keys[3]],data_keys[3]))
-                
-               
-            #     cur_pct,ind_pct,fin_pct,crypt_pct = await asyncio.gather(self.calculate_all_change(currency_data),self.calculate_all_change(indices_data),self.calculate_all_change(financial_data),self.calculate_all_change(crypto_data)) 
-
-            #     # await self.interpret_pct_change(cur_pct,"Currency")
-            #     # Pass the data to LLM
+            
             
         except Exception as e:
             logging.error(f"Error getting data : {e}", exc_info=True)
+            raise
     
+    # !Incomplete
     # This function interpretes the pct change for all instruments   
     async def interpret_pct_change(self, data:dict,asset_cls:str):
         try:
@@ -119,7 +124,7 @@ class COTController:
             logging.error("Error interpreting cot data")     
     
    
-    
+    # Calculate the percentage change for a given period
     async def new_calculate_all_change(self, data:dict):
         try:
             # These are the fields that are relevant to the task 
@@ -214,7 +219,7 @@ class COTController:
         except Exception as e:
             logging.error(f"Error getting data : {e}", exc_info=True)
     
-    
+    # Convert redis to dataframe
     async def new_covert_redis_dataframe(self, asset_list:list, asset_cls:str):
         try:
             # Get all patterns
@@ -288,7 +293,7 @@ class COTController:
                     start_index = i * 1000
                     end_index = min(start_index + 1000 - 1, count - 1)
                     data = await self.cot.get_latest_cot_data(start_index,end_index)
-                    data_list.extend(data.data[:])
+                    data_list.extend(data[:])
             
             
             return data_list
