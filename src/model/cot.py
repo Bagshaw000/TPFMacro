@@ -12,73 +12,73 @@ from database.db import db_connect, init_db_schemas, session_scope, cot_ttf_tabl
 # from main import init_db_schemas, cot_ttf_table, cot_last_entry
 
 
-class CotModel:
+# class CotModel:
     
-    def __init__(self):
-        self.conn = db_connect()
+#     def __init__(self):
+#         self.conn = db_connect()
        
         
-    # Get the last report 
-    async def get_last_report(self):
-        try:
+#     # Get the last report 
+#     async def get_last_report(self):
+#         try:
 
-            data =  self.conn.table('cot_ttf').select("*").order("Market_and_Exchange_Names").order("Report_Date_as_YYYY_MM_DD", desc=True).limit(1).execute()
+#             data =  self.conn.table('cot_ttf').select("*").order("Market_and_Exchange_Names").order("Report_Date_as_YYYY_MM_DD", desc=True).limit(1).execute()
 
-            return data
-        except Exception as e:
-            logging.error(f"error getting last report : {e}")
+#             return data
+#         except Exception as e:
+#             logging.error(f"error getting last report : {e}")
    
-    # Insert the cot tff report 
-    async def insert_tff_report(self, data:list):
-        try:
-            # await self.conn.db.execute("SET statement_timeout = '10min'")
-            response = self.conn.table("cot_ttf").insert(data).execute()
+#     # Insert the cot tff report 
+#     async def insert_tff_report(self, data:list):
+#         try:
+#             # await self.conn.db.execute("SET statement_timeout = '10min'")
+#             response = self.conn.table("cot_ttf").insert(data).execute()
             
-            return response
+#             return response
             
-        except Exception as e:
-            logging.error(f"Error inserting TFF report : {e}",exc_info=True)
+#         except Exception as e:
+#             logging.error(f"Error inserting TFF report : {e}",exc_info=True)
             
-    async def update_ttf_report(self, data:list):
-        try:
-            # await self.conn.db.execute("SET statement_timeout = '10min'")
-            response = self.conn.table("cot_ttf").upsert(data,  on_conflict="Market_and_Exchange_Names, Report_Date_as_YYYY_MM_DD").execute()
+#     async def update_ttf_report(self, data:list):
+#         try:
+#             # await self.conn.db.execute("SET statement_timeout = '10min'")
+#             response = self.conn.table("cot_ttf").upsert(data,  on_conflict="Market_and_Exchange_Names, Report_Date_as_YYYY_MM_DD").execute()
             
-            return response
+#             return response
             
-        except Exception as e:
-            logging.error(f"Error inserting TFF report : {e}")
+#         except Exception as e:
+#             logging.error(f"Error inserting TFF report : {e}")
             
-    # Get the latest Cot data for all instruments   
-    async def get_latest_cot_data(self, start, end):
-        try:
+#     # Get the latest Cot data for all instruments   
+#     async def get_latest_cot_data(self, start, end):
+#         try:
             
-            response = self.conn.table("cot_ttf").select("*",count="exact").order("Report_Date_as_YYYY_MM_DD", desc=True).range(start,end).execute()
+#             response = self.conn.table("cot_ttf").select("*",count="exact").order("Report_Date_as_YYYY_MM_DD", desc=True).range(start,end).execute()
             
-            return response 
-        except Exception as e:
-            logging.error(f"Error returning the latest cot data : {e}")
+#             return response 
+#         except Exception as e:
+#             logging.error(f"Error returning the latest cot data : {e}")
             
-    async def get_cot_data_size(self):
-        try:
-            response = self.conn.table("cot_ttf").select("*" ,count="exact").execute()
+#     async def get_cot_data_size(self):
+#         try:
+#             response = self.conn.table("cot_ttf").select("*" ,count="exact").execute()
             
-            return response
-        except Exception as e:
-            logging.error(f"Error getting number of row : {e}", exc_info=True)
+#             return response
+#         except Exception as e:
+#             logging.error(f"Error getting number of row : {e}", exc_info=True)
 
-    async def get_last_entry(self):
-        try:
-            response = self.conn.table("last_entry").select("*").execute()
+#     async def get_last_entry(self):
+#         try:
+#             response = self.conn.table("last_entry").select("*").execute()
             
-            return response
-        except Exception as e:
-            logging.error(f"Error getting the last entry", exc_info=True)
+#             return response
+#         except Exception as e:
+#             logging.error(f"Error getting the last entry", exc_info=True)
           
     # Get the all cot Data for all Instruments
             
 class CotModell:
-    global cot_last_entry 
+    # global cot_last_entry 
    
    
     

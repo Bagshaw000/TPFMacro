@@ -8,14 +8,12 @@ from fastapi.sse import EventSourceResponse
 from fastapi.concurrency import run_in_threadpool
 import asyncio
 from collections.abc import AsyncIterable
-from src.model.nat import NatsService, nats_router
 import json
 import logging
 import yfinance as yf
 
 router = APIRouter(prefix="/v1/symbol")
 symbol_obj = MarketOverview()
-broker = NatsService.get_broker()
 
 
 
@@ -93,9 +91,9 @@ async def ingest_symbol():
         
         live_tick = await ws.listen()
         
-        await nats_router.broker.publish(subject="symbol.ingested",  # Subject/topic
-                            message=live_tick,        # The actual data payload
-                            )
+        # await nats_router.broker.publish(subject="symbol.ingested",  # Subject/topic
+        #                     message=live_tick,        # The actual data payload
+        #                     )
 
 # loop= asyncio.get_running_loop()  
 # loop.create_task(ingest_symbol())

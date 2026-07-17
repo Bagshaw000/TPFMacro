@@ -3,5 +3,6 @@
         "./src",
         "./src",
         "./src"
-    ]
+    ],
+    "python.analysis.autoTranslateDocstrings": true
 }

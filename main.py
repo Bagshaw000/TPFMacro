@@ -9,19 +9,21 @@ import asyncio
 from fastapi import FastAPI, HTTPException
 from dotenv import load_dotenv
 from contextlib import asynccontextmanager
-
+import pandas as pd
 from src.routes import cot, symbol
 from fastapi.middleware.cors import CORSMiddleware
 from model.market_overview import MarketOverview
-from model.nat import  nats_router, NatsService
 from psycopg_pool import AsyncConnectionPool
 from config.config import get_doppler_env
 from sqlalchemy.ext.asyncio import create_async_engine
+from faststream import FastStream
+from faststream.nats.fastapi import NatsRouter
 
 import logging
 
 market_overview = MarketOverview()
 env_var = get_doppler_env()
+nats_router = NatsRouter("nats://localhost:4222/")
 
 # Load database schema
 
@@ -34,7 +36,7 @@ async def lifespan(app: FastAPI):
    
     load_dotenv()
     asyncio.gather(market_overview.get_currency(), 
-                   market_overview.get_economic_event()) 
+                   market_overview.get_economic_event(), nats_router.startup()) 
     
 
     yield
