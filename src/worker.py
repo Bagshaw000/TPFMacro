@@ -2,6 +2,8 @@ import asyncio
 import logging
 import os
 import sys
+
+from controller.ppi import PPIController
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from httpx import AsyncClient
 from arq import create_pool
@@ -29,6 +31,8 @@ except RuntimeError:
 cot_model = COT()
 market_ovw = MarketOverview()
 cpi_crtl = CPIController()
+ppi_ctrl = PPIController()
+
 
 async def test_cleanup(ctx):
     await cot_model.update_cot()
@@ -47,6 +51,10 @@ async def get_events(ctx):
 async def get_cpi(ctx):
     await cpi_crtl.get_cpi()
     logging.info(f"Running Cpi worker with id ")
+    
+async def get_ppi(ctx):
+    await ppi_ctrl.get_ppi()
+    logging.info(f"Runnin Ppi worker with id")
 
 
 class WorkerSettings:
@@ -61,6 +69,8 @@ class WorkerSettings:
         cron(get_events,weekday='sat', hour=23, unique=True,
             run_at_startup=False),
         cron(get_cpi,day={1, 10, 20}, hour=23, unique=True,
+            run_at_startup=False),
+        cron(get_ppi,day={1, 10, 20}, hour=23, unique=True,
             run_at_startup=False)
     ]
     

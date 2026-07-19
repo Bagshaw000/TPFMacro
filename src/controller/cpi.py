@@ -93,7 +93,22 @@ class CPIController:
             
         except Exception as e:
             logging.error(f"Error getting cpi history: {e}", exc_info=True)
+            raise
             
             
     # async def store_cpi_data(data)
     
+# test = CPIController()
+
+
+# # test = CotModell()
+# loop = asyncio.get_event_loop()
+
+# if loop.is_running():
+#     # If loop is already running, schedule the coroutine
+#     val = asyncio.create_task(test.get_cpi())
+#     print(val)
+# else:
+#     # If no loop is running, run it synchronously
+#     val = asyncio.run(test.get_cpi())
+#     print(val)
