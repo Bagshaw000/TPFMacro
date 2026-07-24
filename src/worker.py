@@ -74,6 +74,6 @@ class WorkerSettings:
             run_at_startup=False)
     ]
     
-    redis_settings = RedisSettings(host='localhost')
+    redis_settings = RedisSettings(host='redis')
     
     
