@@ -1,21 +1,21 @@
-import asyncio
 import logging
 import os
 import sys
+from typing import List
 from sqlmodel import text
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from typing import List
+from custom_types.cpi import UNEMPType
 from database.db import session_scope
-from custom_types.cpi import PPIType
 
 
-class PPIModel:
+class UNEMP_Model:
     
-    async def get_last_report(self)->List[PPIType]:
+    
+    async def get_last_report(self)->List[UNEMPType]:
         try:
             async with session_scope() as session:
                 query = text("""
-                       SELECT * FROM ppi_recent      
+                       SELECT * FROM unemp_recent      
                              
                              """)
                 
@@ -28,13 +28,13 @@ class PPIModel:
                 if not rows:
                     return []
                 
-                return [PPIType.model_validate(row) for row in rows ]
+                return [UNEMPType.model_validate(row) for row in rows ]
             
         except Exception as e:
-            logging.error(f"Error getting the last PPI report for each country: {e}", exc_info=True)
+            logging.error(f"Error getting the last CPI report for each country: {e}", exc_info=True)
             raise
         
-    async def insert_ppi_report(self, data: List[PPIType]):
+    async def insert_unemp_report(self, data: List[UNEMPType]):
         try:
             async with session_scope() as session:
                 async with session.begin():
@@ -46,5 +46,5 @@ class PPIModel:
                         await session.refresh(record)
                     return data
         except Exception as e:
-            logging.error(f"Error inserting into the PPI table {e}", exc_info=True)
+            logging.error(f"Error inserting into the CPI table {e}", exc_info=True)
             raise

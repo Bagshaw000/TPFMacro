@@ -10,7 +10,7 @@ from typing import Optional
 import cot_reports as cot
 from pydantic import BaseModel
 # from src.database.db import db_connect
-from model.cot import CotModell
+from .model.cot import CotModell
 import pandas as pd
 from controller.cot import COTController
 from custom_types.cot import CFTCData, CotData

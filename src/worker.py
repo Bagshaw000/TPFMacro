@@ -3,7 +3,7 @@ import logging
 import os
 import sys
 
-from controller.ppi import PPIController
+
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from httpx import AsyncClient
 from arq import create_pool
@@ -12,7 +12,7 @@ from arq import cron
 from .cot import COT
 from model.market_overview import MarketOverview
 from controller.cpi import CPIController
-
+from controller.ppi import PPIController
 
 try:
     # Check if a loop already exists
@@ -74,6 +74,6 @@ class WorkerSettings:
             run_at_startup=False)
     ]
     
-    redis_settings = RedisSettings(host='redis')
+    redis_settings = RedisSettings(host='localhost')
     
     

@@ -102,17 +102,17 @@ class PPIController:
             raise
         
         
-test = PPIController()
+# test = PPIController()
 
 
-# test = CotModell()
-loop = asyncio.get_event_loop()
+# # test = CotModell()
+# loop = asyncio.get_event_loop()
 
-if loop.is_running():
-    # If loop is already running, schedule the coroutine
-    val = asyncio.create_task(test.get_ppi())
-    print(val)
-else:
-    # If no loop is running, run it synchronously
-    val = asyncio.run(test.get_ppi())
-    print(val)
+# if loop.is_running():
+#     # If loop is already running, schedule the coroutine
+#     val = asyncio.create_task(test.get_ppi())
+#     print(val)
+# else:
+#     # If no loop is running, run it synchronously
+#     val = asyncio.run(test.get_ppi())
+#     print(val)

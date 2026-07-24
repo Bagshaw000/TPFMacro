@@ -28,3 +28,35 @@ class PPIType(SQLModel, table=True):
     freq: str
     report_date: datetime
     index_value: float
+    
+    
+class GDPType(SQLModel, table=True):
+    __tablename__ = "gdp"
+    __table_args__ = (
+        UniqueConstraint(
+            'report_date', 'country_code',
+              name='gdp_unique'
+        ),
+    )
+    id:int | None = Field( primary_key=True, default=None)
+    country_code:str
+    freq: str
+    report_date: datetime
+    index_value: float|None 
+    forecast_value: float|None = Field(  default=None)
+    
+
+class UNEMPType(SQLModel, table=True):
+    __tablename__ = "unemp"
+    __table_args__ = (
+        UniqueConstraint(
+            'report_date', 'country_code',
+              name='unemp_unique'
+        ),
+    )
+    id:int | None = Field( primary_key=True, default=None)
+    country_code:str
+    freq: str
+    report_date: datetime
+    index_value: float|None 
+    forecast_value: float|None = Field(  default=None)
