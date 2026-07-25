@@ -3,6 +3,9 @@ import logging
 import os
 import sys
 
+from controller.gdp import GDPController
+from controller.unemp import UNEMPController
+
 
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from httpx import AsyncClient
@@ -32,6 +35,8 @@ cot_model = COT()
 market_ovw = MarketOverview()
 cpi_crtl = CPIController()
 ppi_ctrl = PPIController()
+unemp_ctrl = UNEMPController()
+gdp_ctrl = GDPController()
 
 
 async def test_cleanup(ctx):
@@ -55,7 +60,14 @@ async def get_cpi(ctx):
 async def get_ppi(ctx):
     await ppi_ctrl.get_ppi()
     logging.info(f"Runnin Ppi worker with id")
-
+    
+async def get_unemp(ctx):
+    await unemp_ctrl.get_unemp()
+    logging.info(f"Runnin Unemployment rate worker with id")
+    
+async def get_gdp(ctx):
+    await gdp_ctrl.get_gdp()
+    logging.info(f"Running GDP worker")
 
 class WorkerSettings:
     
@@ -71,7 +83,11 @@ class WorkerSettings:
         cron(get_cpi,day={1, 10, 20}, hour=23, unique=True,
             run_at_startup=False),
         cron(get_ppi,day={1, 10, 20}, hour=23, unique=True,
-            run_at_startup=False)
+            run_at_startup=False),
+        cron(get_unemp, month={3,9,11},day={15}, unique=True,
+            run_at_startup=False),
+        cron(get_gdp, month={3,9,11},day={17}, unique=True,
+            run_at_startup=False),
     ]
     
     redis_settings = RedisSettings(host='redis')

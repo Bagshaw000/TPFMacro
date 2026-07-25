@@ -10,7 +10,7 @@ from model.unemp import UNEMP_Model
 from typing import List
 
 
-class UnempController:
+class UNEMPController:
     
     def __init__(self):
         self.unemp = UNEMP_Model()
@@ -103,17 +103,17 @@ class UnempController:
             logging.error(f"Error getting cpi history: {e}", exc_info=True)
             raise        
             
-test = UnempController()
+# test = UnempController()
 
 
-# test = CotModell()
-loop = asyncio.get_event_loop()
+# # test = CotModell()
+# loop = asyncio.get_event_loop()
 
-if loop.is_running():
-    # If loop is already running, schedule the coroutine
-    val = asyncio.create_task(test.get_unemp())
-    print(val)
-else:
-    # If no loop is running, run it synchronously
-    val = asyncio.run(test.get_unemp())
-    print(val)
+# if loop.is_running():
+#     # If loop is already running, schedule the coroutine
+#     val = asyncio.create_task(test.get_unemp())
+#     print(val)
+# else:
+#     # If no loop is running, run it synchronously
+#     val = asyncio.run(test.get_unemp())
+#     print(val)
