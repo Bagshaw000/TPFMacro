@@ -1,6 +1,7 @@
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from controller.economic_event import EconomicEventController
 from model.market_overview import MarketOverview
 from fastapi import APIRouter,WebSocket, WebSocketDisconnect
 from fastapi.responses import JSONResponse
@@ -14,7 +15,7 @@ import yfinance as yf
 
 router = APIRouter(prefix="/v1/symbol")
 symbol_obj = MarketOverview()
-
+event_ctrl = EconomicEventController()
 
 
 
@@ -125,22 +126,32 @@ async def get_news_events(websocket:WebSocket,category: str, pair: str):
         logging.error("Client disconnected", exc_info=True)
 
 
-@router.websocket("/ws/event/{country}")
-async def get_symbol_datas(websocket:WebSocket,country: str,):
+@router.websocket("/event/{country}")
+async def get_symbol_data(websocket:WebSocket,country: str):
     await websocket.accept()
-    # print(category)
-    data = await symbol_obj.get_news_events(country)
     try:
         while True:
-            
+            data = await event_ctrl.get_event_country(country.upper())
             await asyncio.sleep(2) 
             await websocket.send_json(json.dumps(data))
-            
     except WebSocketDisconnect:
-        print("Client disconnected")
-        logging.error("Client disconnected", exc_info=True)
-
-
+            print("Client disconnected")
+            logging.error("Client disconnected", exc_info=True)
+    
+        
+@router.websocket("/event")
+async def get_news_event(websocket:WebSocket):
+    await websocket.accept()
+    data = await event_ctrl.get_all_events()
+    try:
+        while True:
+            await asyncio.sleep(2) 
+            await websocket.send_json(json.dumps(data))
+    except WebSocketDisconnect:
+            print("Client disconnected")
+            logging.error("Client disconnected", exc_info=True)
+            
+            
 @router.get('/snapshot/{category}/{ticker}')
 async def get_market_snapshot(category:str, ticker:str):
     data  = await symbol_obj.symbol_snapshot(ticker, category)

@@ -2,11 +2,6 @@ import asyncio
 import logging
 import os
 import sys
-
-from controller.gdp import GDPController
-from controller.unemp import UNEMPController
-
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from httpx import AsyncClient
 from arq import create_pool
@@ -16,6 +11,9 @@ from .cot import COT
 from model.market_overview import MarketOverview
 from controller.cpi import CPIController
 from controller.ppi import PPIController
+from controller.economic_event import EconomicEventController
+from controller.gdp import GDPController
+from controller.unemp import UNEMPController
 
 try:
     # Check if a loop already exists
@@ -37,9 +35,10 @@ cpi_crtl = CPIController()
 ppi_ctrl = PPIController()
 unemp_ctrl = UNEMPController()
 gdp_ctrl = GDPController()
+econ_event_ctrl = EconomicEventController()
 
 
-async def test_cleanup(ctx):
+async def cot_update(ctx):
     await cot_model.update_cot()
     print("Running")
     logging.info(f"Running COT worker with id ")
@@ -47,11 +46,11 @@ async def test_cleanup(ctx):
 async def currency_snapshot(ctx):
     
     await market_ovw.get_currency()
-    logging.info(f"Running currency snapshot worker with id ")
+    logging.info(f"Running currency snapshot worker")
     
 async def get_events(ctx):
-    await market_ovw.get_economic_event()
-    logging.info(f"Running economic event worker with id ")
+    await econ_event_ctrl.store_economic_event()
+    logging.info(f"Running economic event worker")
     
 async def get_cpi(ctx):
     await cpi_crtl.get_cpi()
@@ -69,11 +68,13 @@ async def get_gdp(ctx):
     await gdp_ctrl.get_gdp()
     logging.info(f"Running GDP worker")
 
+
+
 class WorkerSettings:
     
     
     cron_jobs = [
-        cron(test_cleanup,  weekday="wed", hour=23, unique=True,
+        cron(cot_update,  weekday="wed", hour=23, unique=True,
             run_at_startup=False),
         cron(currency_snapshot, hour=5 , minute=0, 
             unique=True,
@@ -90,6 +91,6 @@ class WorkerSettings:
             run_at_startup=False),
     ]
     
-    redis_settings = RedisSettings(host='redis')
+    redis_settings = RedisSettings(host='localhost')
     
     

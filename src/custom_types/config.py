@@ -13,4 +13,6 @@ class ConfigType(BaseModel):
     db_name:str
     db_password:str
     db_user:str
+    twitter_token:str
+    twitter_proxy:str
     

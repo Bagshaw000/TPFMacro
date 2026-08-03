@@ -1,5 +1,6 @@
 from datetime import datetime
 
+from pydantic import BaseModel
 from sqlmodel import Field, SQLModel, UniqueConstraint
 
 
@@ -60,3 +61,10 @@ class UNEMPType(SQLModel, table=True):
     report_date: datetime
     index_value: float|None 
     forecast_value: float|None = Field(  default=None)
+    
+class EconomicEventType(BaseModel):
+    event:str
+    country_code: str
+    event_time: datetime | str
+    last_value: float | str | None
+    expiration: int | None = None

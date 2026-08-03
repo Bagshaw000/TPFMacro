@@ -35,8 +35,7 @@ async def lifespan(app: FastAPI):
     
    
     load_dotenv()
-    asyncio.gather(market_overview.get_currency(), 
-                   market_overview.get_economic_event(), nats_router.startup()) 
+    asyncio.gather(market_overview.get_currency(), nats_router.startup()) 
     
 
     yield
