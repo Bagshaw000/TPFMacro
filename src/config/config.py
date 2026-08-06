@@ -35,7 +35,8 @@ def doppler_secret()->ConfigType:
             db_password = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_PASSWORD").value['raw'],
             db_user = doppler.secrets.get(project="tpf_macro", config="dev", name="DB_USER").value['raw'],
             twitter_token= doppler.secrets.get(project="tpf_macro", config="dev", name="TWITTER_TOKEN").value['raw'],
-            twitter_proxy= doppler.secrets.get(project="tpf_macro", config="dev", name="PROXY_SERVER").value['raw']
+            twitter_proxy= doppler.secrets.get(project="tpf_macro", config="dev", name="PROXY_SERVER").value['raw'],
+            news_token = doppler.secrets.get(project="tpf_macro", config="dev", name="NEWS_TOKEN").value['raw']
         )
         
         

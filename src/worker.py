@@ -14,6 +14,8 @@ from controller.ppi import PPIController
 from controller.economic_event import EconomicEventController
 from controller.gdp import GDPController
 from controller.unemp import UNEMPController
+from controller.news import NewsSentimentController
+
 
 try:
     # Check if a loop already exists
@@ -36,7 +38,7 @@ ppi_ctrl = PPIController()
 unemp_ctrl = UNEMPController()
 gdp_ctrl = GDPController()
 econ_event_ctrl = EconomicEventController()
-
+news_sentiment_ctrl = NewsSentimentController()
 
 async def cot_update(ctx):
     await cot_model.update_cot()
@@ -68,7 +70,8 @@ async def get_gdp(ctx):
     await gdp_ctrl.get_gdp()
     logging.info(f"Running GDP worker")
 
-
+async def get_new_sentiment(ctx):
+    await news_sentiment_ctrl.all_country_sentiment()
 
 class WorkerSettings:
     
@@ -89,8 +92,10 @@ class WorkerSettings:
             run_at_startup=False),
         cron(get_gdp, month={3,9,11},day={17}, unique=True,
             run_at_startup=False),
+        cron(get_new_sentiment, hour={0, 3, 6, 9, 12, 15, 18, 21},  # Every 3rd hour of the day
+            minute=0 )
     ]
     
-    redis_settings = RedisSettings(host='localhost')
+    redis_settings = RedisSettings(host='redis')
     
     
