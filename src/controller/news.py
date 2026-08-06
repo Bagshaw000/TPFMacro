@@ -108,7 +108,7 @@ class NewsSentimentController:
             redis = await self.redis.get_async_redis()
             
             key = f"sentiment_news:{country.upper()}"
-            senti = redis.set(key, sentiment_score, ex=14400)
+            senti = await redis.set(key, sentiment_score, ex=14400)
             return senti
         except Exception as e:
             logging.error(f"Error storing sentiment value for country{country}: {e}",exc_info=True)
