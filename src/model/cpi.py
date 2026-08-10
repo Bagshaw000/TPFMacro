@@ -9,6 +9,7 @@ from typing import List
 from database.db import session_scope
 from custom_types.cpi import CPIType
 
+countries = ['USA','CAN','JPN','DEU','GBR','AUS','IND','CHN','KOR','BRA','FRA']
 
 class CPIModel:
     
@@ -49,17 +50,59 @@ class CPIModel:
         except Exception as e:
             logging.error(f"Error inserting into the CPI table {e}", exc_info=True)
             raise
+    
+    
+    async def get_percent_cpi(self):
+        try:
+            global countries
+            placeholders = "','".join(countries) 
+            
+            # params = {str(i): country for i, country in enumerate(countries)}
+            # print(params)
+            async with session_scope() as session:
+                query=text(f"""WITH RankedCPI AS (
+                        SELECT 
+                            id,
+                            country_code,
+                            report_date,
+                            index_value,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY country_code 
+                                ORDER BY report_date DESC
+                            ) AS rn
+                        FROM public.cpi
+                        WHERE country_code = ANY(:countries)
+                    )
+                    SELECT 
+                        country_code,
+                        report_date,
+                        index_value
+                    FROM RankedCPI 
+                    WHERE rn <= 2
+                    ORDER BY country_code, report_date DESC  """)
+                
+                result = await session.exec(query, params={"countries": countries})
+                rows  = result.mappings().all()
+                                
+                                
+                if not rows:
+                    return []
+                
+                return [CPIType.model_validate(row) for row in rows ]
+            
+        except Exception as e:
+            logging.error(f"Error in getting cpi value from database: {e}", exc_info=True)
 
+            raise
+        
 # test = CPIModel()
-
-
 # loop = asyncio.get_event_loop()
 
 # if loop.is_running():
 # #     # If loop is already running, schedule the coroutine
-#     val = asyncio.run(test.get_last_report())
+#     val = asyncio.run(test.get_percent_cpi())
 #     print(val)
 # else:
 #     # If no loop is running, run it synchronously
-#     val = asyncio.run(test.get_last_report())
+#     val = asyncio.run(test.get_percent_cpi())
 #     print(val)

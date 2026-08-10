@@ -13,7 +13,7 @@ class CPIType(SQLModel, table=True):
     
     id:int | None = Field( primary_key=True, default=None)
     country_code:str
-    freq: str
+    freq: str|None = Field( primary_key=True, default=None)
     report_date: datetime
     index_value: float
     

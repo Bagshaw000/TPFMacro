@@ -1,24 +1,24 @@
 # This class handles all things CPI
 from datetime import datetime
+import json
 import os
 import sys
 import asyncio
 import logging
 from typing import List
-
-import pandas as pd
-
-
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sdmx
 from custom_types.cpi import CPIType
 from model.cpi import CPIModel
-# from src.nat import broker
+import pandas as pd
+from database.redis_ import RedisConnection
+
 
 class CPIController:
     
     def __init__(self):
         self.cpi = CPIModel()
+        self.redis = RedisConnection().get_async_redis()
     
     async def get_cpi(self, country=["USA","CAN","JPN","DEU","GBR","AUS","IND","CHN","KOR","BRA","FRA"]):
         try:
@@ -61,6 +61,9 @@ class CPIController:
                 new_date = least_date.report_date.strftime('%Y-%m')
                 
                 cpi_data = await self.get_cpi_history(country_key, new_date)
+                # update the cpi redis 
+                
+                await self.store_percent_change()
                 
                 logging.info(f"Update CPI data: {new_country_key}")
     
@@ -95,20 +98,86 @@ class CPIController:
             logging.error(f"Error getting cpi history: {e}", exc_info=True)
             raise
             
+    async def calculate_pct_change(self) :
+        try:
+            # Get the last two cpi value 
+            cpi_values = await self.cpi.get_percent_cpi()
             
+            if not cpi_values:
+                return None
+            
+            df = pd.DataFrame([
+    {
+        'country_code': item.country_code,
+        'report_date': item.report_date,  # Make sure this field exists
+        'index_value': item.index_value
+    }
+    for item in cpi_values
+])
+            
+            print(df.columns.to_list())
+            df['report_date'] = pd.to_datetime(df['report_date'])
+            df = df.sort_values(['country_code', 'report_date'])
+
+            # Calculate percentage change
+            df['pct_change'] = df.groupby('country_code')['index_value'].pct_change() * 100
+            df['change_points'] = df.groupby('country_code')['index_value'].diff()
+        
+            return df
+        except Exception as e:
+            logging.error(f"Error Calculating the percentage change:{e}")   
+            raise
+        
+    async def store_percent_change(self):
+        try:
+            pct_df = await self.calculate_pct_change()
+            
+            if pct_df is None:
+                return
+            
+            df_with_pct = pct_df[pct_df['pct_change'].notna()].copy()
+            
+            avg_df = df_with_pct['pct_change'].mean()
+            
+            
+           
+            pipeline = self.redis.pipeline()
+            df_with_pct['report_date']= df_with_pct['report_date'].dt.strftime('%Y-%m-%d')
+            result_dict = df_with_pct.set_index('country_code').to_dict('index')
+           
+            
+            key = "cpi"
+            if not result_dict:
+                return None
+            
+            print(result_dict)
+            for country, data in result_dict.items():
+                pipeline.set(f"{key}:{str(country)}", json.dumps(data))
+            
+            pipeline.set(f"{key}:avg",value= json.dumps(avg_df))
+            
+            pipe_res = await pipeline.execute()
+            
+            
+            return pipe_res
+        
+            
+        except Exception as e:
+            logging.error(f"Error sftoring percent change: {e}",exc_info=True)
+            raise
     # async def store_cpi_data(data)
     
-# test = CPIController()
+test = CPIController()
 
 
-# # test = CotModell()
-# loop = asyncio.get_event_loop()
+# test = CotModell()
+loop = asyncio.get_event_loop()
 
-# if loop.is_running():
-#     # If loop is already running, schedule the coroutine
-#     val = asyncio.create_task(test.get_cpi())
-#     print(val)
-# else:
-#     # If no loop is running, run it synchronously
-#     val = asyncio.run(test.get_cpi())
-#     print(val)
+if loop.is_running():
+    # If loop is already running, schedule the coroutine
+    val = asyncio.create_task(test.store_percent_change())
+    print(val)
+else:
+    # If no loop is running, run it synchronously
+    val = asyncio.run(test.store_percent_change())
+    print(val)
