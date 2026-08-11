@@ -1,21 +1,23 @@
 import asyncio
+import json
 import logging
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from typing import List
-
+from database.redis_ import RedisConnection
 import pandas as pd
 import sdmx
 
-from custom_types.cpi import GDPType
+from custom_types.cpi import GDPType, countries
 from model.gdp import GDPModel
 
 
 class GDPController:
     def __init__(self):
         self.gdp = GDPModel()
-    
+        self.redis = RedisConnection().get_async_redis()
+        
     async def get_gdp(self,country=["USA","CAN","JPN","DEU","GBR","AUS","IND","CHN","KOR","BRA","FRA"]):
         try:
             last_gdp = await self.gdp.get_last_report()
@@ -104,6 +106,74 @@ class GDPController:
         except Exception as e:
             logging.error(f"Error getting cpi history: {e}", exc_info=True)
             raise
+        
+    async def calculate_pct_change(self) :
+        try:
+            # Get the last two cpi value 
+            gdp_values = await self.gdp.get_percent_gdp()
+            
+            if not gdp_values:
+                return None
+            
+            df = pd.DataFrame([
+                {
+                    'country_code': item.country_code,
+                    'report_date': item.report_date,  # Make sure this field exists
+                    'index_value': item.index_value
+                }
+                for item in gdp_values
+            ])
+            
+    
+            df['report_date'] = pd.to_datetime(df['report_date'])
+            df = df.sort_values(['country_code', 'report_date'])
+
+            # Calculate percentage change
+            df['pct_change'] = df.groupby('country_code')['index_value'].pct_change() * 100
+            df['change_points'] = df.groupby('country_code')['index_value'].diff()
+
+            return df
+        except Exception as e:
+            logging.error(f"Error Calculating the percentage change:{e}")   
+            raise
+                
+    async def store_percent_change(self):
+        try:
+            pct_df = await self.calculate_pct_change()
+            
+            if pct_df is None:
+                return
+            
+            df_with_pct = pct_df[pct_df['pct_change'].notna()].copy()
+            
+            avg_df = df_with_pct['pct_change'].mean()
+            
+            
+            
+            pipeline = self.redis.pipeline()
+            df_with_pct['report_date']= df_with_pct['report_date'].dt.strftime('%Y-%m-%d')
+            result_dict = df_with_pct.set_index('country_code').to_dict('index')
+            
+            
+            key = "gdp"
+            if not result_dict:
+                return None
+            
+            print(result_dict)
+            for country, data in result_dict.items():
+                pipeline.set(f"{key}:{str(country)}", json.dumps(data))
+            
+            pipeline.set(f"{key}:avg",value= json.dumps(avg_df))
+            
+            pipe_res = await pipeline.execute()
+            
+            
+            return pipe_res
+        
+            
+        except Exception as e:
+            logging.error(f"Error sftoring percent change: {e}",exc_info=True)
+            raise
 # test = GDPController()
 
 
@@ -116,5 +186,5 @@ class GDPController:
 #     print(val)
 # else:
 #     # If no loop is running, run it synchronously
-#     val = asyncio.run(test.get_gdp())
-#     print(val)
+# val = asyncio.run(test.store_percent_change())
+# print(val)

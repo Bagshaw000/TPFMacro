@@ -7,9 +7,7 @@ from sqlmodel import text
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from typing import List
 from database.db import session_scope
-from custom_types.cpi import CPIType
-
-countries = ['USA','CAN','JPN','DEU','GBR','AUS','IND','CHN','KOR','BRA','FRA']
+from custom_types.cpi import CPIType, countries
 
 class CPIModel:
     
@@ -55,7 +53,7 @@ class CPIModel:
     async def get_percent_cpi(self):
         try:
             global countries
-            placeholders = "','".join(countries) 
+            
             
             # params = {str(i): country for i, country in enumerate(countries)}
             # print(params)

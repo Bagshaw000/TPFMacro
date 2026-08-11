@@ -12,8 +12,8 @@ import numpy as np
 import requests
 import http.client, urllib.parse
 import json
+from custom_types.cpi import country_mapping, map_country_codes
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
-
 country=["US","CA","JP","DE","UK","AU","IN","CN","KR","BR","FR"]
 
 class NewsSentimentController:
@@ -67,6 +67,7 @@ class NewsSentimentController:
             
             return res_dict
        
+
         except Exception as e:
             logging.error(f"Error getting new article: {e}", exc_info=True)
             raise
@@ -106,8 +107,10 @@ class NewsSentimentController:
     async def store_sentiment(self, country:str, sentiment_score:float):
         try:
             redis = await self.redis.get_async_redis()
+            l3_country = map_country_codes(country)
+            print(l3_country)
             
-            key = f"sentiment_news:{country.upper()}"
+            key = f"sentiment_news:{l3_country}"
             senti = await redis.set(key, sentiment_score, ex=14400)
             return senti
         except Exception as e:

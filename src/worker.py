@@ -72,7 +72,9 @@ async def get_gdp(ctx):
 
 async def get_new_sentiment(ctx):
     await news_sentiment_ctrl.all_country_sentiment()
-
+    logging.info(f"Running news sentiment")
+    
+    
 class WorkerSettings:
     
     

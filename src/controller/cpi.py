@@ -8,7 +8,7 @@ import logging
 from typing import List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import sdmx
-from custom_types.cpi import CPIType
+from custom_types.cpi import CPIType, countries
 from model.cpi import CPIModel
 import pandas as pd
 from database.redis_ import RedisConnection
@@ -20,9 +20,10 @@ class CPIController:
         self.cpi = CPIModel()
         self.redis = RedisConnection().get_async_redis()
     
-    async def get_cpi(self, country=["USA","CAN","JPN","DEU","GBR","AUS","IND","CHN","KOR","BRA","FRA"]):
+    async def get_cpi(self):
         try:
-            country_key = "+".join(country)
+            global countries
+            country_key = "+".join(countries)
             
             # Get the last the entry for cpi for all country
             last_cpi = await self.cpi.get_last_report()
@@ -46,7 +47,7 @@ class CPIController:
                 # Get all countries with cpi in databasae
                 db_country = [ele.country_code for ele in last_cpi]
                 # Check if there are new countries added to the list of countries
-                new_country = [ele for ele in country if ele not in set(db_country)]
+                new_country = [ele for ele in countries if ele not in set(db_country)]
                 
                 # Add the new countries cpi data to database
                 if new_country:
@@ -137,7 +138,9 @@ class CPIController:
             
             df_with_pct = pct_df[pct_df['pct_change'].notna()].copy()
             
-            avg_df = df_with_pct['pct_change'].mean()
+            max_date = df_with_pct['report_date'].max()
+            df_latest = df_with_pct[df_with_pct['report_date'] == max_date].copy()
+            avg_df = df_latest['pct_change'].mean()
             
             
            
@@ -165,19 +168,19 @@ class CPIController:
         except Exception as e:
             logging.error(f"Error sftoring percent change: {e}",exc_info=True)
             raise
-    # async def store_cpi_data(data)
+
     
-test = CPIController()
+# test = CPIController()
 
 
-# test = CotModell()
-loop = asyncio.get_event_loop()
+# # test = CotModell()
+# loop = asyncio.get_event_loop()
 
-if loop.is_running():
-    # If loop is already running, schedule the coroutine
-    val = asyncio.create_task(test.store_percent_change())
-    print(val)
-else:
-    # If no loop is running, run it synchronously
-    val = asyncio.run(test.store_percent_change())
-    print(val)
+# if loop.is_running():
+#     # If loop is already running, schedule the coroutine
+#     val = asyncio.create_task(test.store_percent_change())
+#     print(val)
+# else:
+#     # If no loop is running, run it synchronously
+# val = asyncio.run(test.store_percent_change())
+# print(val)

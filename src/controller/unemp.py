@@ -1,4 +1,5 @@
 import asyncio
+import json
 import logging
 import os
 import sys
@@ -8,12 +9,14 @@ import sdmx
 from custom_types.cpi import UNEMPType
 from model.unemp import UNEMP_Model
 from typing import List
+from database.redis_ import RedisConnection
 
 
 class UNEMPController:
     
     def __init__(self):
         self.unemp = UNEMP_Model()
+        self.redis = RedisConnection().get_async_redis()
        
     
     async def get_unemp(self, country=["USA","CAN","JPN","DEU","GBR","AUS","IND","CHN","KOR","BRA","FRA"]):
@@ -48,6 +51,7 @@ class UNEMPController:
                 new_date = least_date.report_date.strftime('%Y')
                 
                 gdp_data = await self.get_unemp_history(country, new_date)
+                await self.store_percent_change()
                 
                 logging.info(f"Update PPI data: {new_country}")
         except Exception as e:
@@ -100,10 +104,79 @@ class UNEMPController:
                     )
             return unemp_model
         except Exception as e:
-            logging.error(f"Error getting cpi history: {e}", exc_info=True)
-            raise        
+            logging.error(f"Error getting unemp history: {e}", exc_info=True)
+            raise   
+        
+        
+    async def calculate_pct_change(self) :
+        try:
+            # Get the last two cpi value 
+            unemp_values = await self.unemp.get_percent_unemp()
             
-# test = UnempController()
+            if not unemp_values:
+                return None
+            
+            df = pd.DataFrame([
+                {
+                    'country_code': item.country_code,
+                    'report_date': item.report_date,  # Make sure this field exists
+                    'index_value': item.index_value
+                }
+                for item in unemp_values
+            ])
+            
+    
+            df['report_date'] = pd.to_datetime(df['report_date'])
+            df = df.sort_values(['country_code', 'report_date'])
+
+            # Calculate percentage change
+            df['pct_change'] = df.groupby('country_code')['index_value'].pct_change() * 100
+            df['change_points'] = df.groupby('country_code')['index_value'].diff()
+
+            return df
+        except Exception as e:
+            logging.error(f"Error Calculating the percentage change:{e}")   
+            raise
+                    
+    async def store_percent_change(self):
+        try:
+            pct_df = await self.calculate_pct_change()
+            
+            if pct_df is None:
+                return
+            
+            df_with_pct = pct_df[pct_df['pct_change'].notna()].copy()
+            max_date = df_with_pct['report_date'].max()
+            df_latest = df_with_pct[df_with_pct['report_date'] == max_date].copy()
+            avg_df = df_latest['pct_change'].mean()
+            
+            
+            pipeline = self.redis.pipeline()
+            df_with_pct['report_date']= df_with_pct['report_date'].dt.strftime('%Y-%m-%d')
+            result_dict = df_with_pct.set_index('country_code').to_dict('index')
+            
+            
+            key = "unemp"
+            if not result_dict:
+                return None
+            
+            print(result_dict)
+            for country, data in result_dict.items():
+                pipeline.set(f"{key}:{str(country)}", json.dumps(data))
+            
+            pipeline.set(f"{key}:avg",value= json.dumps(avg_df))
+            
+            pipe_res = await pipeline.execute()
+            
+            
+            return pipe_res
+        
+            
+        except Exception as e:
+            logging.error(f"Error storing Unemployment percent change: {e}",exc_info=True)
+            raise     
+            
+# test = UNEMPController()
 
 
 # # test = CotModell()
@@ -115,5 +188,5 @@ class UNEMPController:
 #     print(val)
 # else:
 #     # If no loop is running, run it synchronously
-#     val = asyncio.run(test.get_unemp())
-#     print(val)
+# val = asyncio.run(test.store_percent_change())
+# print(val)

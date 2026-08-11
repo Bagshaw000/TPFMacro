@@ -4,7 +4,7 @@ import sys
 from typing import List
 from sqlmodel import text
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
-from custom_types.cpi import UNEMPType
+from custom_types.cpi import UNEMPType, countries
 from database.db import session_scope
 
 
@@ -47,4 +47,45 @@ class UNEMP_Model:
                     return data
         except Exception as e:
             logging.error(f"Error inserting into the CPI table {e}", exc_info=True)
+            raise
+        
+    
+    async def get_percent_unemp(self):
+        try:
+            global countries
+            
+            async with session_scope() as session:
+                query=text(f"""WITH RankedUNEMP AS (
+                        SELECT 
+                            id,
+                            country_code,
+                            report_date,
+                            index_value,
+                            ROW_NUMBER() OVER (
+                                PARTITION BY country_code 
+                                ORDER BY report_date DESC
+                            ) AS rn
+                        FROM public.ppi
+                        WHERE country_code = ANY(:countries)
+                    )
+                    SELECT 
+                        country_code,
+                        report_date,
+                        index_value
+                    FROM RankedUNEMP 
+                    WHERE rn <= 2
+                    ORDER BY country_code, report_date DESC  """)
+                
+                result = await session.exec(query, params={"countries": countries})
+                rows  = result.mappings().all()
+                                
+                                
+                if not rows:
+                    return []
+                
+                return [UNEMPType.model_validate(row) for row in rows ]
+            
+        except Exception as e:
+            logging.error(f"Error in getting unemployment rate value from database: {e}", exc_info=True)
+
             raise
