@@ -16,10 +16,12 @@ from config.config import get_doppler_env
 from sqlalchemy.ext.asyncio import create_async_engine
 from faststream import FastStream
 from faststream.nats.fastapi import NatsRouter
+from src.controller.cot import COTController
 
 import logging
 
 market_overview = MarketOverview()
+cot_ctrl =  COTController()
 env_var = get_doppler_env()
 nats_router = NatsRouter("nats://localhost:4222/")
 
@@ -33,9 +35,8 @@ async def lifespan(app: FastAPI):
     
    
     load_dotenv()
-    asyncio.gather(market_overview.get_currency(), nats_router.startup()) 
+    asyncio.gather(market_overview.get_currency(), nats_router.startup(), cot_ctrl.setup_redis()) 
     
-
     yield
     
 

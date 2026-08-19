@@ -26,3 +26,12 @@ async def economies_summary():
         return JSONResponse(status_code=200, content=data)
     
     return JSONResponse(status_code=500, content=None)
+
+@router.get("/economy/{country}")
+async def country_stats(country:str):
+    data = await macro_ctrl.get_country_stats(country)
+    
+    if data:
+        return JSONResponse(status_code=200, content=data)
+        
+    return JSONResponse(status_code=500, content=None)

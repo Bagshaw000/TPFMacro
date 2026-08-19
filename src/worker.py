@@ -86,14 +86,14 @@ class WorkerSettings:
             run_at_startup=False),
         cron(get_events,weekday='sat', hour=23, unique=True,
             run_at_startup=False),
-        cron(get_cpi,day={1, 10, 20}, hour=23, unique=True,
-            run_at_startup=False),
-        cron(get_ppi,day={1, 10, 20}, hour=23, unique=True,
-            run_at_startup=False),
-        cron(get_unemp, month={3,9,11},day={15}, unique=True,
-            run_at_startup=False),
-        cron(get_gdp, month={3,9,11},day={17}, unique=True,
-            run_at_startup=False),
+        # cron(get_cpi,day={1, 10, 20}, hour=23, unique=True,
+        #     run_at_startup=False),
+        # cron(get_ppi,day={1, 10, 20}, hour=23, unique=True,
+        #     run_at_startup=False),
+        # cron(get_unemp, month={3,9,11},day={15}, unique=True,
+        #     run_at_startup=False),
+        # cron(get_gdp, month={3,9,11},day={17}, unique=True,
+        #     run_at_startup=False),
         cron(get_new_sentiment, hour={0, 3, 6, 9, 12, 15, 18, 21},  # Every 3rd hour of the day
             minute=0 )
     ]

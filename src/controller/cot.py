@@ -1,11 +1,12 @@
 import asyncio
-from datetime import datetime
+from datetime import datetime, timedelta
 import json
 import logging
 import math
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from custom_types.cot import CotData
 from database.redis_ import RedisConnection
 from model.cot import CotModell
 import pandas as pd
@@ -15,6 +16,7 @@ class COTController:
     
     def __init__(self):
         self.redis = RedisConnection().get_redis()
+        self.aioredis = RedisConnection().get_async_redis()
         self.cot = CotModell() 
         
     #Get Cot data 
@@ -24,9 +26,9 @@ class COTController:
             data_obj = dict()
             check_cot =   self.redis.keys("cot_ttf*")
             
-            # # self.redis.hdel('cot_ttf', *check_cot)
             # self.redis.delete(*check_cot)
 
+            # return
             # # Or clear all fields but keep the hash
             # # self.redis.hdel('cot_ttf', *self.redis.hkeys('cot_ttf*'))
             # return
@@ -41,17 +43,8 @@ class COTController:
             # Check if we have existing records not in redis
             if not check_cot:
                 
-                # Get the size of cot data from database
-                data = await self.cot.get_cot_data_size()
+                data_list = await self.cot.get_all_last_year_cot()
                 
-                # If no data is returned then stop operation
-                if not data:
-                    logging.info("Getting cot data size returns None")
-                    return
-                
-                # Then we process the data in 1000 batch size
-                data_list = await self.batch_get_data(data)
-                # print((data))
                 
                 # If batch data is not returned then stop operations
                 if not data_list:
@@ -110,7 +103,7 @@ class COTController:
                 # Search if the recent explanation has been set
                 instrument_key = f"cot_expl:{asset_cls}:{instrument}:{date_series}"
                 check_exp = self.redis.hgetall(instrument_key)
-                # print(check_exp)
+                
                 
                 if check_exp:
                     # Just append explanation to the  dict object
@@ -128,8 +121,8 @@ class COTController:
     async def new_calculate_all_change(self, data:dict):
         try:
             # These are the fields that are relevant to the task 
-            fields = ['Large_Spec_Net', 'Commercial_Net', 'Dealer_Net', 
-                  'Asset_Mgr_Net', 'Lev_Money_Net', 'Other_Rept_Net']
+            fields = ['large_spec_net', 'commercial_net', 'dealer_net', 
+                  'asset_mgr_Net', 'lev_money_net', 'other_rept_net']
 
             # Periods to call calculate pct change
             periods = {'1_month': 4, '3_month': 12, '6_month': 24, '1_year': 52}
@@ -280,132 +273,173 @@ class COTController:
             logging.error(f"Converting redis to dataframe", exc_info=True)
             
             
-    #Get all cot data in batches  
-    async def batch_get_data(self, count:int):
-        try:
-            data_list = []
-            if count> 0:
-                
-                loop_len = math.ceil(count/1000)
-                
-                for i in range(loop_len):
-                   
-                    start_index = i * 1000
-                    end_index = min(start_index + 1000 - 1, count - 1)
-                    data = await self.cot.get_latest_cot_data(start_index,end_index)
-                    data_list.extend(data[:])
-            
-            
-            return data_list
-        except Exception as e:
-            logging.error(f"Error batch processing : {e}")
-
     # This insert the cot_ttf into the redis
-    async def insert_cot_redis(self, data:list):
+    async def insert_cot_redis(self, data:list[CotData]):
         try:
             # pass
-            pipe = self.redis.pipeline()
-            # print(len(data))
-            df = pd.DataFrame(data)
+            batch_size = 1000
+            
+           
+            df = pd.DataFrame.from_records([r.__dict__ for r in data])
+            
+            # Remove 'id' and 'market' if you don't need them
+            df = df.drop(columns=['_sa_instance_state','id'], errors='ignore')
+            
+            # Reverse to chronological order (oldest first)
+            
+            df["report_date_as_yyyy_mm_dd"]= df["report_date_as_yyyy_mm_dd"]
+           
             
             # Example calculations
-            df['Dealer_Net'] = df['Dealer_Positions_Long_All'] - df['Dealer_Positions_Short_All']
+            df['dealer_net'] = df['dealer_positions_long_all'] - df['dealer_positions_short_all']
             # Positive = Dealers are net long (could be bearish signal - hedging client selling)
             # Negative = Dealers are net short (could be bullish signal - hedging client buying)
             
-            df['Asset_Mgr_Net'] = df['Asset_Mgr_Positions_Long_All'] - df['Asset_Mgr_Positions_Short_All']
+            df['asset_mgr_net'] = df['asset_mgr_positions_long_all'] - df['asset_mgr_positions_short_all']
             # Positive = Institutions bullish (trend-following)
             # Negative = Institutions bearish (trend-following)
             
-            df['Lev_Money_Net'] = df['Lev_Money_Positions_Long_All'] - df['Lev_Money_Positions_Short_All']
+            df['lev_money_net'] = df['lev_money_positions_long_all'] - df['lev_money_positions_short_all']
             # Positive = Hedge funds/CTAs bullish (often crowded - contrarian signal at extremes)
             # Negative = Hedge funds/CTAs bearish (often crowded - contrarian signal at extremes)
                         
-            df['Other_Rept_Net'] = df['Other_Rept_Positions_Long_All'] - df['Other_Rept_Positions_Short_All']
+            df['other_rept_net'] = df['other_rept_positions_long_all'] - df['other_rept_positions_short_all']
             
             
-            df['Commercial_Net'] = df['Dealer_Net'] + df['Other_Rept_Net']
+            df['commercial_net'] = df['dealer_net'] + df['other_rept_net']
             # Positive = Commercials net long (smart money bullish)
             # Negative = Commercials net short (smart money bearish)
 
-            df['Large_Spec_Net'] = df['Asset_Mgr_Net'] + df['Lev_Money_Net']
+            df['large_spec_net'] = df['asset_mgr_net'] + df['lev_money_net']
             # Positive = Speculators bullish (sentiment indicator)
             # Negative = Speculators bearish (sentiment indicator)
             
-            new_df = df[["Market_and_Exchange_Names","Market","Report_Date_as_YYYY_MM_DD","Dealer_Net", 'Dealer_Positions_Long_All','Dealer_Positions_Short_All','Asset_Mgr_Net','Asset_Mgr_Positions_Long_All', 'Asset_Mgr_Positions_Short_All','Commercial_Net','Lev_Money_Positions_Long_All','Lev_Money_Positions_Short_All','Large_Spec_Net','Other_Rept_Net']]
+            new_df = df[["market_and_exchange_names","market","report_date_as_yyyy_mm_dd","dealer_net", 'dealer_positions_long_all','dealer_positions_short_all','asset_mgr_net','asset_mgr_positions_long_all', 'asset_mgr_positions_short_all','commercial_net','lev_money_positions_long_all','lev_money_positions_short_all','large_spec_net','other_rept_net',"open_interest_all"]]
             
-          
-            for index, row in new_df.iterrows():
-                row_date = datetime.fromisoformat(row["Report_Date_as_YYYY_MM_DD"])
-                pipe.hset(f"cot_ttf:{row["Market"]}:{row["Market_and_Exchange_Names"]}:{row_date.date()}", mapping=row.to_dict())
-            
-            exec = pipe.execute()  
+            # Batch execute the insert functionality
+            for i in range(0, len(new_df), batch_size):
+                batch = new_df.iloc[i:i+batch_size]
+                pipe = self.aioredis.pipeline()
+                for index, row in new_df.iterrows():
+                    # Get temporary data
+                    tmp_data:dict = row.to_dict()
+                    tmp_data["report_date_as_yyyy_mm_dd"]= datetime.strftime(row["report_date_as_yyyy_mm_dd"], "%Y-%m-%d")
+                    
+                    # Get the expiration date
+                    expiration_date = await self.get_ttl_until_60_weeks(datetime.strftime(row["report_date_as_yyyy_mm_dd"], "%Y-%m-%d"))
+                    row_date = datetime.fromisoformat(datetime.strftime(row["report_date_as_yyyy_mm_dd"], "%Y-%m-%d"))
+                    
+                    key = f"cot_ttf:{row["market"]}:{row["market_and_exchange_names"]}:{row_date.date()}"
+                    pipe.hset(key, mapping=tmp_data)
+                    pipe.expire(key,time= expiration_date)
+
+                    
+                exec = await pipe.execute()  
             
             return exec  
             
             
         except Exception as e:
             logging.error(f"Error inserting into redis data : {e}",exc_info=True)
+            raise
     
-    # # This function cleans the redis data from  
-    # async def clear_redis(self):
-    #     try:
-    #         data_obj = dict()
-    #         with open('data/instr.json', 'r') as f:
-    #             data = json.load(f)
+    # Get the expiration for 60 weeks in seconds
+    async def get_ttl_until_60_weeks(self,reference_date_str, format="%Y-%m-%d"):
+        """
+        Returns the number of seconds from the current moment until
+        the date that is 60 weeks after the provided reference_date.
+        """
+        # Parse the reference date
+        ref_date = datetime.strptime(reference_date_str, format)
+        
+        # Calculate the future expiration date (60 weeks later)
+        expire_date = ref_date + timedelta(weeks=60)
+        
+        # Get the current time
+        now = datetime.now()
+        
+        # Calculate the TTL in seconds
+        ttl_seconds = int((expire_date - now).total_seconds())
+        
+        # Return 0 if the expiration date is in the past
+        return max(0, ttl_seconds)    
+    
+    
+    
+    
+    async def cot_asset_position(self, asset_name:str, asset_cls:str):
+        try:
+            # check if asset data exist in redis
+            pass
+            
+            
+        except Exception as e:
+            logging.error(f"Error calculating asset position")
+            raise
+    
+    async def get_asset_year(self, asset:str, asset_cls:str ):
+        try:
+                    # check if asset data exist in redis
+            pipeline = self.aioredis.pipeline()
+            key = f"cot_ttf:{asset_cls}:{asset}:*"
+            all_keys = list()
+            cursor = 0
+            keys = self.redis.scan_iter(match=key,count=1000)
+            
+            print(all_keys)
+                    
+                    
+        except Exception as e:
+            logging.error(f"Error calculating asset position")
+            raise
+        
+    # This setup redis to ensure data is coherent for database and redis
+    async def setup_redis(self):
+        try:
+            cot_status =  await  self.aioredis.get("cot_status")
+            
+            # Check if the status updated
+            if cot_status != 1:
+                check_cot =   self.redis.keys("cot_ttf*")
+                print(check_cot)
                 
-    #         for category, items in data.items():
-    #             data_obj[category] = set(items)
-            
-            
-    #         data_keys = list(set(data_obj.keys()))   
-    #         # print(data_keys)
-            
-    #         if data_obj is not {}:
-    #             for category , items in data_obj.items():
-    #                 # print(catergory)
-    #                 # print(items)
-    #                 for symbol in items:
-    #                     print(symbol)
+                if check_cot ==[]:
+                    data_list = await self.cot.get_all_last_year_cot()
+                                                        
+                    # If batch data is not returned then stop operations
+                    if not data_list:
+                        logging.info("data list is empty")
+                        return
+                    
+                    # Insert redis records
+                    await self.insert_cot_redis(data_list)
+                    
+                else:
+                    clear_cache = await self.aioredis.delete(*check_cot)
+                    
+                    print(clear_cache)
+                    # Ensure the all data in cot_ttf is deleted
+                    if clear_cache != 0:
                         
-    #                     pattern = f"cot_ttf:{category}:{symbol}:*"
+                        data_list = await self.cot.get_all_last_year_cot()
+                                        
+                        # If batch data is not returned then stop operations
+                        if not data_list:
+                            logging.info("data list is empty")
+                            return
                         
-    #                     data = list(self.redis.scan_iter(pattern))
-    #                     data.sort(reverse=True)
-    #                     if len(data) == 0: 
-    #                         continue
-                            
-    #                     # dates = [k in data]
-                                                                        
-    #                     print(data[:53])
-    #                     pass
-                
+                        # Insert redis records
+                        await self.insert_cot_redis(data_list)
+                        
+                await  self.aioredis.set("cot_status",1)
+                logging.info(f"Redis has been updated")
+                        
+            logging.info(f"Redis is already updated")
             
-            
-    #     except Exception as e:
-    #         logging.error(f"", exc_info=True)
-
+        except Exception as e:
+            logging.error(f"Error setting up redis: {e}", exc_info=True)
+            raise
+        
+        
 # test = COTController()
-# asyncio.run(test.clear_redis())
-
-# import pandas as pd
-
-# # Assuming df is your COT DataFrame
-
-# # DEALER/INTERMEDIARY (Sell Side)
-# df['Dealer_Net'] = df['Dealer_Positions_Long_All'] - df['Dealer_Positions_Short_All']
-
-# # ASSET MANAGER/INSTITUTIONAL (Buy Side - Long Term)
-# df['Asset_Mgr_Net'] = df['Asset_Mgr_Positions_Long_All'] - df['Asset_Mgr_Positions_Short_All']
-
-# # LEVERAGED FUNDS (Buy Side - Speculative)
-# df['Lev_Money_Net'] = df['Lev_Money_Positions_Long_All'] - df['Lev_Money_Positions_Short_All']
-
-# # OTHER REPORTABLES (Buy Side - Commercial Hedgers)
-# df['Other_Rept_Net'] = df['Other_Rept_Positions_Long_All'] - df['Other_Rept_Positions_Short_All']
-
-# # TOTAL REPORTABLE (All categories combined)
-# df['Tot_Rept_Net'] = df['Tot_Rept_Positions_Long_All'] - df['Tot_Rept_Positions_Short_All']
-
-# # NON-REPORTABLE (Small/Retail Traders)
-# df['NonRept_Net'] = df['NonRept_Positions_Long_All'] - df['NonRept_Positions_Short_All']
+# val = asyncio.run(test.setup_redis())

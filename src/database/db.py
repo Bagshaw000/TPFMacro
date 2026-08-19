@@ -47,7 +47,10 @@ cot_last_entry: Table | None = None
 DB_URL = f"postgresql+asyncpg://{secrets.db_user}:{secrets.db_password}@{secrets.db_server}/{secrets.db_name}"
 
 
-db_engine =  create_async_engine(DB_URL, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False)
+db_engine =  create_async_engine(DB_URL, pool_size=10, max_overflow=20, pool_pre_ping=True, echo=False,  connect_args={
+        "timeout": 90,  # Connection timeout in seconds
+        "command_timeout": 90,  # Command timeout
+    })
 
 async def init_db_schemas():
     global cot_ttf_table , cot_last_entry

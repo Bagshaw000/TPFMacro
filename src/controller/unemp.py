@@ -6,7 +6,7 @@ import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import pandas as pd
 import sdmx
-from custom_types.cpi import UNEMPType
+from custom_types.cpi import UNEMPType, countries
 from model.unemp import UNEMP_Model
 from typing import List
 from database.redis_ import RedisConnection
@@ -62,46 +62,49 @@ class UNEMPController:
         try:
            
             IMF_DATA = sdmx.Client('IMF_DATA')
+            print(IMF_DATA.series_keys)
             
             country_key = "+".join(countries)
             # Dictionary key format
             key_dict = {
                 'COUNTRY': country_key,
-                'INDICATOR': 'LUR',
-                'FREQUENCY': 'A'
+                'INDICATOR': 'U',
+                'TYPE_OF_TRANSFORMATION': 'POP_PCH_PT', 
+                'FREQUENCY': 'M'
             }
             
             # Fetch data
             data_msg = IMF_DATA.data(
-                'WEO',
+                'LS',
                 key=key_dict,  # ✅ Pass as dictionary
-                params={'startPeriod': '2010-01'},
+                params={'startPeriod': start_date},
+               
             )
             
             unemp_df = sdmx.to_pandas(data_msg)
             
-            today = pd.Timestamp.now()
-
-            # Get date 1 year ago
-            last_year = today - pd.DateOffset(years=1)
+            print(unemp_df.tail(10))
+            # today = pd.Timestamp.now()
+            # # Get date 1 year ago
+            # last_year = today - pd.DateOffset(years=1)
             if unemp_df.empty:
                 return None
             
             unemp_model = []
             for _, idx in unemp_df.reset_index().iterrows():
-                report_date = pd.to_datetime(idx["TIME_PERIOD"], format='%Y')
+                report_date = pd.to_datetime(idx["TIME_PERIOD"], format='%Y-M%m')
                 
-                if  report_date <= last_year:
-                    unemp_model.append(
-                        UNEMPType(
-                            country_code=idx["COUNTRY"],
-                            freq=idx["FREQUENCY"],
-                            report_date=report_date,
-                            index_value=idx["value"] ,
-                            # forecast_value=idx["value"] if report_date > last_year else None,
-                            id=None
-                        )
+                
+                unemp_model.append(
+                    UNEMPType(
+                        country_code=idx["COUNTRY"],
+                        freq=idx["FREQUENCY"],
+                        report_date=report_date,
+                        index_value=idx["value"] ,
+                        # forecast_value=idx["value"] if report_date > last_year else None,
+                        id=None
                     )
+                )
             return unemp_model
         except Exception as e:
             logging.error(f"Error getting unemp history: {e}", exc_info=True)
@@ -176,17 +179,18 @@ class UNEMPController:
             logging.error(f"Error storing Unemployment percent change: {e}",exc_info=True)
             raise     
             
-# test = UNEMPController()
+test = UNEMPController()
 
 
-# # test = CotModell()
-# loop = asyncio.get_event_loop()
+# test = CotModell()
+loop = asyncio.get_event_loop()
 
-# if loop.is_running():
-#     # If loop is already running, schedule the coroutine
-#     val = asyncio.create_task(test.get_unemp())
-#     print(val)
-# else:
-#     # If no loop is running, run it synchronously
-# val = asyncio.run(test.store_percent_change())
-# print(val)
+if loop.is_running():
+    
+    # If loop is already running, schedule the coroutine
+    val = asyncio.create_task(test.get_unemp_history(["USA"]))
+    # print(val)
+else:
+    # If no loop is running, run it synchronously
+    val = asyncio.run(test.get_unemp_history(["USA"]))
+    # print(val)

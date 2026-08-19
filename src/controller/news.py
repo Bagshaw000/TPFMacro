@@ -110,7 +110,7 @@ class NewsSentimentController:
             l3_country = map_country_codes(country)
             print(l3_country)
             
-            key = f"sentiment_news:{l3_country}"
+            key = f"sentiment_news:{"".join(l3_country)}"
             senti = await redis.set(key, sentiment_score, ex=14400)
             return senti
         except Exception as e:
@@ -122,6 +122,7 @@ class NewsSentimentController:
         try:
             global country
             for ele in country:
+                print(ele)
                 store = await self.news_sentiment(ele)
                 
         except Exception as e:

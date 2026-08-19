@@ -91,22 +91,58 @@ class MacroController:
             logging.error(f"Error getting global stats: {e}", exc_info=True)
             raise 
         
-    # async def get_country_stats(self: country:str):
-    #         try:
+    async def get_country_stats(self, country:str):
+        try:
+            data = defaultdict()
+            keys = []
+            pipeline = self.redis.pipeline()
+            for macro in macro_list:
+                key = f"{macro}:{country}"
+                keys.append(key)
+                pipeline.get(key)
+            
+            sentiment_keys = [f"sentiment_news:{country}" for country in countries]
+            for senti_key in sentiment_keys:
+                pipeline.get(senti_key)
+            # Execute all gets at once
+            results = await pipeline.execute()
+            
+            macro_results = results[:len(keys)]
+            sentiment_results = results[len(keys):]
+
+            for key, tmp_data in zip(keys, macro_results):
+                # Parse key to get country and macro
+                macro, country = key.split(':')
+                senti_key = f"sentiment_news:{country}"
+                senti_score = await self.redis.get(senti_key)
                 
-                
-    #         except Exception as e:
-    #             logging.error(f"Error getting ")
-    #             raise
+                if tmp_data:
+                    json_data = json.loads(tmp_data)
+                    data[macro] = json_data.get("pct_change")
+                    data[f"{macro}_date"] = json_data.get("report_date")
+                    
+                else:
+                    data[macro] = None  
+            
+            for country, senti_score in zip(countries, sentiment_results):
+                if senti_score:
+                    data["new_sentiment"] = float(senti_score)
+                else:
+                    data["new_sentiment"] = None
+            
+            return data
+        except Exception as e:
+            logging.error(f"Error getting countries macro data")
+            raise
 
-# test = MacroController()
-# loop = asyncio.get_event_loop()
+test = MacroController()
+loop = asyncio.get_event_loop()
 
-# if loop.is_running():
-#     val = asyncio.create_task(test.get_global_stats())
+if loop.is_running():
+    val = asyncio.create_task(test.get_country_stats("USA"))
 
-#     print(val)  
+    print(val)  
     
-# else:
-#     val = asyncio.run(test.get_global_stats())
-#     print(val) 
+else:
+    val = asyncio.run(test.get_country_stats("USA"))
+    print(val) 
