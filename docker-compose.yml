@@ -35,6 +35,8 @@ services:
     image: redis:8.4
     command: redis-server --save 60 1 --loglevel warning
     container_name: redis
+    expose:
+      - 6379:6379
     volumes:
       - redis_data:/data
     networks:
