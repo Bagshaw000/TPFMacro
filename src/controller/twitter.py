@@ -110,17 +110,17 @@ class TwitterController:
         return text
     
             
-test = TwitterController()
+# test = TwitterController()
 
 
-loop = asyncio.get_event_loop()
+# loop = asyncio.get_event_loop()
 
-if loop.is_running():
-    # If loop is already running, schedule the coroutine
-    # nltk.download('vader_lexicon')
-    val = asyncio.create_task(test.active_sentiment())
-    print(val)
-else:
-    # If no loop is running, run it synchronously
-    val = asyncio.run(test.active_sentiment())
-    print(val)
+# if loop.is_running():
+#     # If loop is already running, schedule the coroutine
+#     # nltk.download('vader_lexicon')
+#     val = asyncio.create_task(test.active_sentiment())
+#     print(val)
+# else:
+#     # If no loop is running, run it synchronously
+#     val = asyncio.run(test.active_sentiment())
+#     print(val)

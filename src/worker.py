@@ -1,7 +1,27 @@
+"""arq worker entry point: defines the scheduled (cron) background jobs
+that keep Redis/Postgres populated with market data - COT positioning,
+currency snapshots, economic calendar events, LSE indicators (CPI/PPI/
+UNEMP/GDP/inflation/retail), and news sentiment.
+
+Run via arq against this module (`arq worker.WorkerSettings`); arq reads
+`WorkerSettings.cron_jobs` and `WorkerSettings.redis_settings` to know what
+to run and where its own job queue lives.
+
+# BROKEN IMPORT: `from .cot import COT` below expects a class named `COT`
+# in src/cot.py, but that file only defines `COTNew` (which does have the
+# `update_cot()` method this worker calls) - there is no `COT` symbol in
+# src/cot.py at all. As it stands, importing this module raises
+# `ImportError: cannot import name 'COT' from 'cot'`. Looks like a rename
+# that missed this import; needs either `from .cot import COTNew as COT`
+# or updating the reference to `COTNew` directly.
+"""
+
 import asyncio
 import logging
 import os
 import sys
+
+from controller.lse_ import LSEController
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from httpx import AsyncClient
 from arq import create_pool
@@ -9,11 +29,11 @@ from arq.connections import RedisSettings
 from arq import cron
 from .cot import COT
 from model.market_overview import MarketOverview
-from controller.cpi import CPIController
-from controller.ppi import PPIController
+# from controller.cpi import CPIController
+# from controller.ppi import PPIController
 from controller.economic_event import EconomicEventController
-from controller.gdp import GDPController
-from controller.unemp import UNEMPController
+# from controller.gdp import GDPController
+# from controller.unemp import UNEMPController
 from controller.news import NewsSentimentController
 
 
@@ -23,81 +43,102 @@ try:
 except RuntimeError:
     if sys.platform == 'win32':
         # Windows-specific network engine
+        # Windows' default asyncio loop (ProactorEventLoop) is
+        # incompatible with some libraries used here (e.g. certain
+        # psycopg/asyncpg internals); the Selector-based policy avoids that.
         asyncio.set_event_loop_policy(asyncio.WindowsSelectorEventLoopPolicy())
     else:
         # Ultra-efficient Linux native initialization
         loop = asyncio.new_event_loop()
         asyncio.set_event_loop(loop)
-        
-        
 
+
+
+# Controller/model instances are constructed once at module import time and
+# reused across every job run - arq workers are long-running processes, so
+# this avoids re-establishing DB/Redis connections on every scheduled
+# invocation.
 cot_model = COT()
 market_ovw = MarketOverview()
-cpi_crtl = CPIController()
-ppi_ctrl = PPIController()
-unemp_ctrl = UNEMPController()
-gdp_ctrl = GDPController()
+# cpi_crtl = CPIController()
+# ppi_ctrl = PPIController()
+# unemp_ctrl = UNEMPController()
+# gdp_ctrl = GDPController()
 econ_event_ctrl = EconomicEventController()
 news_sentiment_ctrl = NewsSentimentController()
+lse_ctrl = LSEController()
+
+# Each job below is an arq task function: arq always calls it with a `ctx`
+# dict (job context - not used by any of these), and the function's job is
+# just to delegate to the matching controller/model and log completion.
 
 async def cot_update(ctx):
     await cot_model.update_cot()
-    print("Running")
+    # print("Running")
     logging.info(f"Running COT worker with id ")
-    
+
 async def currency_snapshot(ctx):
-    
+
     await market_ovw.get_currency()
     logging.info(f"Running currency snapshot worker")
-    
+
 async def get_events(ctx):
     await econ_event_ctrl.store_economic_event()
     logging.info(f"Running economic event worker")
-    
-async def get_cpi(ctx):
-    await cpi_crtl.get_cpi()
-    logging.info(f"Running Cpi worker with id ")
-    
-async def get_ppi(ctx):
-    await ppi_ctrl.get_ppi()
-    logging.info(f"Runnin Ppi worker with id")
-    
-async def get_unemp(ctx):
-    await unemp_ctrl.get_unemp()
-    logging.info(f"Runnin Unemployment rate worker with id")
-    
-async def get_gdp(ctx):
-    await gdp_ctrl.get_gdp()
-    logging.info(f"Running GDP worker")
+
+async def get_lse(ctx):
+    await lse_ctrl.get_event_cal()
+    logging.info(f"Running LSE worker with id ")
+
+# async def get_ppi(ctx):
+#     await ppi_ctrl.get_ppi()
+#     logging.info(f"Runnin Ppi worker with id")
+
+# async def get_unemp(ctx):
+#     await unemp_ctrl.get_unemp()
+#     logging.info(f"Runnin Unemployment rate worker with id")
+
+# async def get_gdp(ctx):
+#     await gdp_ctrl.get_gdp()
+#     logging.info(f"Running GDP worker")
 
 async def get_new_sentiment(ctx):
     await news_sentiment_ctrl.all_country_sentiment()
     logging.info(f"Running news sentiment")
-    
-    
+
+
 class WorkerSettings:
-    
-    
+    # arq reads this class directly (via `arq worker.WorkerSettings`) to
+    # know which jobs to schedule and how to reach its own job-queue Redis.
+
     cron_jobs = [
+        # Every Wednesday at 23:00 - weekly CFTC COT reports are typically
+        # released Friday afternoons (for the prior Tuesday's data), so this
+        # actually reflects data current as of ~1 week earlier than a
+        # Friday run would; unique=True prevents overlapping runs if one is
+        # still in progress, run_at_startup=False means it won't fire
+        # immediately when the worker process starts.
         cron(cot_update,  weekday="wed", hour=23, unique=True,
             run_at_startup=False),
-        cron(currency_snapshot, hour=5 , minute=0, 
+        # Every day at 05:00.
+        cron(currency_snapshot, hour=5 , minute=0,
             unique=True,
             run_at_startup=False),
+        # Every Saturday at 23:00.
         cron(get_events,weekday='sat', hour=23, unique=True,
             run_at_startup=False),
-        # cron(get_cpi,day={1, 10, 20}, hour=23, unique=True,
-        #     run_at_startup=False),
-        # cron(get_ppi,day={1, 10, 20}, hour=23, unique=True,
-        #     run_at_startup=False),
-        # cron(get_unemp, month={3,9,11},day={15}, unique=True,
-        #     run_at_startup=False),
-        # cron(get_gdp, month={3,9,11},day={17}, unique=True,
-        #     run_at_startup=False),
+        # On the 1st, 5th, 10th, 15th, 20th, 25th, and 30th of every month at
+        # 23:00 (roughly every 5 days, catching most monthly release dates).
+        cron(get_lse,day={1, 5, 10, 15, 20, 25, 30}, hour=23, unique=True,
+            run_at_startup=False),
+        # Every 3 hours (00/03/06/09/12/15/18/21), on the hour.
+        # No unique/run_at_startup override, so this uses arq's defaults
+        # (unique=True, run_at_startup=True) unlike the other jobs above.
         cron(get_new_sentiment, hour={0, 3, 6, 9, 12, 15, 18, 21},  # Every 3rd hour of the day
             minute=0 )
     ]
-    
+
+    # Redis instance arq itself uses to store/dispatch jobs - separate from
+    # RedisConnection (database/redis_.py) used by the app's own data cache.
     redis_settings = RedisSettings(host='redis')
-    
-    
+

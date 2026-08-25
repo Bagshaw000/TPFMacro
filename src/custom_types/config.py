@@ -16,4 +16,6 @@ class ConfigType(BaseModel):
     twitter_token:str
     twitter_proxy:str
     news_token: str
+    lse_key: str
+    modelrail_key: str
     

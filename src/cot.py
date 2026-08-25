@@ -17,7 +17,7 @@ from custom_types.cot import CFTCData, CotData, COT_COLUMN_MAPPING
 from datetime import datetime, date
 import re
 
-class COTNew:
+class COT:
     
     def __init__(self):
         self.cot_ctrl = COTController()
@@ -226,7 +226,7 @@ class COTNew:
             # Check for any columns that weren't renamed
             missing_columns = set(load_df.columns) - set(COT_COLUMN_MAPPING.values())
             if missing_columns:
-                logginig.info(f"Warning: These columns weren't renamed: {missing_columns}")
+                logging.info(f"Warning: These columns weren't renamed: {missing_columns}")
                         
             # Rename the columns for ease of manipulation
             instrument_list:list =[]

@@ -135,14 +135,14 @@ class MacroController:
             logging.error(f"Error getting countries macro data")
             raise
 
-test = MacroController()
-loop = asyncio.get_event_loop()
+# test = MacroController()
+# loop = asyncio.get_event_loop()
 
-if loop.is_running():
-    val = asyncio.create_task(test.get_country_stats("USA"))
+# if loop.is_running():
+#     val = asyncio.create_task(test.get_country_stats("USA"))
 
-    print(val)  
+#     print(val)  
     
-else:
-    val = asyncio.run(test.get_country_stats("USA"))
-    print(val) 
+# else:
+#     val = asyncio.run(test.get_country_stats("USA"))
+#     print(val) 
