@@ -461,6 +461,6 @@ class LSEController:
 
 # Guarded so importing this module (e.g. from another controller) doesn't
 # trigger a live run against the real LSE API / DB / Redis as a side effect.
-# if __name__ == "__main__":
-#     test = LSEController()
-#     asyncio.run(test.get_event_cal())
+if __name__ == "__main__":
+    test = LSEController()
+    asyncio.run(test.get_event_cal())

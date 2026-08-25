@@ -1,6 +1,13 @@
 
+import os
 import redis
 import redis.asyncio as aioredis
+
+# Defaults to 'redis' (the docker-compose service name) so the app works
+# unchanged inside docker; set REDIS_HOST=localhost in the environment when
+# running outside docker (e.g. a local Redis, or `docker compose` with the
+# redis port published to the host).
+REDIS_HOST = os.getenv("REDIS_HOST", "redis")
 
 
 class RedisConnection:
@@ -8,11 +15,11 @@ class RedisConnection:
     pool = None
     _async_pool = None
 
-    
-    
+
+
     def get_redis(self):
         if self.pool_instance is None:
-            redis_pool = redis.ConnectionPool( host='redis',
+            redis_pool = redis.ConnectionPool( host=REDIS_HOST,
                 port=6379,
                 db=0,
                 max_connections=50,
@@ -29,7 +36,7 @@ class RedisConnection:
         if RedisConnection._async_pool is None:
             # FIX: Check and set the exact same class-level variable name
             RedisConnection._async_pool = aioredis.ConnectionPool(
-                host='redis',
+                host=REDIS_HOST,
                 port=6379,
                 db=0,
                 max_connections=50,
