@@ -29,6 +29,7 @@ from arq.connections import RedisSettings
 from arq import cron
 from .cot import COT
 from model.market_overview import MarketOverview
+from controller.macro import MacroController
 # from controller.cpi import CPIController
 # from controller.ppi import PPIController
 from controller.economic_event import EconomicEventController
@@ -67,6 +68,7 @@ market_ovw = MarketOverview()
 econ_event_ctrl = EconomicEventController()
 news_sentiment_ctrl = NewsSentimentController()
 lse_ctrl = LSEController()
+macro_ctrl = MacroController()
 
 # Each job below is an arq task function: arq always calls it with a `ctx`
 # dict (job context - not used by any of these), and the function's job is
@@ -106,6 +108,10 @@ async def get_new_sentiment(ctx):
     await news_sentiment_ctrl.all_country_sentiment()
     logging.info(f"Running news sentiment")
 
+async def refresh_factor_stats(ctx):
+    await macro_ctrl.refresh_factor_stats()
+    logging.info(f"Running factor stats refresh worker")
+
 
 class WorkerSettings:
     # arq reads this class directly (via `arq worker.WorkerSettings`) to
@@ -135,7 +141,13 @@ class WorkerSettings:
         # No unique/run_at_startup override, so this uses arq's defaults
         # (unique=True, run_at_startup=True) unlike the other jobs above.
         cron(get_new_sentiment, hour={0, 3, 6, 9, 12, 15, 18, 21},  # Every 3rd hour of the day
-            minute=0 )
+            minute=0 ),
+        # Every Sunday at 22:00 - trailing (mu, sigma) stats barely move
+        # between individual releases, so a weekly refresh keeps the cache
+        # (see controller/macro.py's STATS_TTL) well ahead of its 9-day
+        # expiry without hitting Postgres on every economic-cycle read.
+        cron(refresh_factor_stats, weekday="sun", hour=22, unique=True,
+            run_at_startup=False),
     ]
 
     # Redis instance arq itself uses to store/dispatch jobs - separate from

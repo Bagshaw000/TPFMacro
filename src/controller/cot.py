@@ -459,7 +459,7 @@ class COTController:
             cursor = 0
             keys = self.redis.scan_iter(match=key,count=1000)
 
-            print(all_keys)
+            
 
 
         except Exception as e:
@@ -479,7 +479,7 @@ class COTController:
             # Check if the status updated
             if cot_status != 1:
                 check_cot =   self.redis.keys("cot_ttf*")
-                print(check_cot)
+             
 
                 if check_cot ==[]:
                     data_list = await self.cot.get_all_last_year_cot()
@@ -495,7 +495,7 @@ class COTController:
                 else:
                     clear_cache = await self.aioredis.delete(*check_cot)
 
-                    print(clear_cache)
+                   
                     # Ensure the all data in cot_ttf is deleted
                     if clear_cache != 0:
 

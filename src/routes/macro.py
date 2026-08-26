@@ -20,7 +20,7 @@ async def get_global_avg():
 
 @router.get("/economies")
 async def economies_summary():
-    data = await macro_ctrl.get_global_stats()
+    data = await macro_ctrl.get_global_cycle()
     
     if data:
         return JSONResponse(status_code=200, content=data)
@@ -29,7 +29,7 @@ async def economies_summary():
 
 @router.get("/economy/{country}")
 async def country_stats(country:str):
-    data = await macro_ctrl.get_country_stats(country)
+    data = await macro_ctrl.get_country_stats(country.upper())
     
     if data:
         return JSONResponse(status_code=200, content=data)

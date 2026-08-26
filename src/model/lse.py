@@ -3,6 +3,7 @@ import logging
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+from datetime import datetime, timedelta
 from typing import Any, List
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlmodel import text
@@ -39,7 +40,52 @@ class LSEModel:
         except Exception as e:
             logging.error(f"Error getting the last PPI report for each country: {e}", exc_info=True)
             raise
-        
+
+    async def get_trailing_stats(self, table: str, years: int = 5) -> dict[str, dict[str, float]]:
+        """Trailing mean/stdev of `index_value` per country for `table`,
+        over the last `years` years - the (mu, sigma) input the economic-
+        cycle z-score calculation standardizes each factor's latest
+        reading against (see controller/macro.py's refresh_factor_stats).
+
+        Computed with AVG/STDDEV_SAMP in Postgres (one query per factor)
+        rather than pulling full row history into Python, since only the
+        two aggregate numbers per country are actually needed.
+        """
+        try:
+            if table not in ECON_INDICATOR_TYPES:
+                raise ValueError(f"Unknown indicator table: {table}")
+
+            cutoff = datetime.now() - timedelta(days=365 * years)
+
+            async with session_scope() as session:
+                # `table` is only ever one of ECON_INDICATOR_TYPES' own
+                # keys (validated above), never raw user input, so
+                # interpolating it as an identifier here is safe - bind
+                # params only cover values (like `cutoff`), not table names.
+                query = text(f"""
+                    SELECT country_code,
+                           AVG(index_value) AS mu,
+                           STDDEV_SAMP(index_value) AS sigma
+                    FROM {table}
+                    WHERE report_date >= :cutoff
+                    GROUP BY country_code
+                """).bindparams(cutoff=cutoff)
+
+                result = await session.exec(query)
+                rows = result.mappings().all()
+
+            return {
+                row["country_code"]: {
+                    "mu": float(row["mu"]) if row["mu"] is not None else 0.0,
+                    "sigma": float(row["sigma"]) if row["sigma"] is not None else 0.0,
+                }
+                for row in rows
+            }
+
+        except Exception as e:
+            logging.error(f"Error getting trailing stats for {table}: {e}", exc_info=True)
+            raise
+
     async def insert_event(self, data: List[_EconIndicatorWithForecast]) -> List[_EconIndicatorWithForecast]:
         try:
             if not data:
@@ -81,3 +127,8 @@ class LSEModel:
         except Exception as e:
             logging.error(f"Error inserting data into the table: {e}", exc_info=True)
             raise
+
+
+if __name__ == "__main__":
+    test = LSEModel()
+    print(asyncio.run(test.get_trailing_stats("cpi")))

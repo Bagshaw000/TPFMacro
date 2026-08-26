@@ -626,9 +626,9 @@ class MarketOverview:
             with ThreadPoolExecutor(max_workers=5) as executor:
                 loop = asyncio.get_running_loop()
                 
-                task1 = loop.run_in_executor(executor,atr, df[-90:])
+                task1 = loop.run_in_executor(executor,atr, df[-90:].copy())
                 task2 = loop.run_in_executor(executor,calc_rsi, df.tail(90)['close'])
-                task3 = loop.run_in_executor(executor,ema_20, df[-90:])
+                task3 = loop.run_in_executor(executor,ema_20, df[-90:].copy())
                 
                 result_corr, result_vol,result_ema= await asyncio.gather(task1, task2, task3)
             
