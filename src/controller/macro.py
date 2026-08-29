@@ -34,16 +34,23 @@ pipeline that feeds the economic-cycle calculator below:
                              country, batched into two Redis pipelines
                              total instead of calling get_economic_cycle()
                              (and its several round trips) once per country
+
+get_cross_section_panel() feeds a different consumer entirely: the
+"Orthogonal View" frontend's buildPanel() swap point, which wants 60
+monthly YoY% series per country (cpi, ppi, retailNom) plus a monthly
+unemployment rate series (unemp) - see that function's docstring for how
+this bridges TPFMacro's MoM-only LSE data into the YoY shape it expects.
 """
 
 import asyncio
 from collections import defaultdict
+from datetime import datetime, timedelta
 import json
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.redis_ import RedisConnection
-from custom_types.cpi import countries
+from custom_types.cpi import countries, country_mapping, get_country_code
 from model.lse import LSEModel
 from .lse_ import events_
 import logging
@@ -72,6 +79,45 @@ FACTOR_CONFIG = {
     "ppi":       {"weight": 1/3,  "orientation": 1,  "category": "inflation"},
     "inflation": {"weight": 1/3,  "orientation": 1,  "category": "inflation"},
 }
+
+
+# Cross-section panel config (feeds get_cross_section_panel(), the
+# Orthogonal View frontend's buildPanel() swap point - see that method's
+# docstring). TPFMacro's own 3-letter codes mapped to the frontend's
+# 2-letter-ish codes; the frontend has no Eurozone aggregate, so only the
+# countries this app actually tracks per-country (custom_types.cpi's
+# `countries`) are included.
+#
+# Derived from custom_types.cpi's country_mapping via get_country_code()
+# rather than hardcoded, so this list of codes can't drift out of sync
+# with the rest of the app's own country mapping.
+#
+# One override is required: country_mapping has both 'GB' and 'UK' mapped
+# to 'GBR', and get_country_code() returns whichever key comes first in
+# the dict ('GB' - custom_types.cpi orders it that way deliberately, to
+# prefer ISO 3166-1 alpha-2 for TPFMacro's own reverse lookups elsewhere).
+# But the Orthogonal View source this panel feeds uses "UK" specifically
+# (its XS_META/ECON keys are US/EU/CN/JP/UK/IN/BR/DE) - keeping that exact
+# contract intact matters more here than TPFMacro's own internal
+# convention, so GBR is force-mapped to "UK" rather than letting the
+# generic reverse-lookup silently hand back "GB" instead.
+_XS_CODE_OVERRIDES: dict[str, str] = {"GBR": "UK"}
+
+XS_COUNTRY_CODES: dict[str, str] = {
+    tpf_code: _XS_CODE_OVERRIDES.get(tpf_code) or get_country_code(tpf_code, country_mapping)
+    for tpf_code in countries
+}
+
+# How many monthly YoY observations get_cross_section_panel() returns per
+# series - matches buildPanel()'s "60 observations" requirement.
+PANEL_MONTHS = 30
+
+# If a country's most recent synced reading (across cpi/ppi/retail/unemp)
+# is older than this, get_cross_section_panel() logs a warning - a panel
+# can have exactly PANEL_MONTHS points (so the completeness gate passes)
+# while still being built from a stalled sync, and without checking the
+# actual report_date there'd be no way to tell.
+STALE_DATA_DAYS = 45
 
 
 def _z_score(x: float, mu: float, sigma: float) -> float:
@@ -125,6 +171,30 @@ def _classify_quadrant(growth: float, inflation: float) -> str:
     if growth < 0 and inflation >= 0:
         return "Stagflation"
     return "Recession"
+
+
+def _mom_to_yoy(mom_series: list[float]) -> list[float]:
+    """Chain a month-over-month % change series into an approximate
+    year-over-year % change series, since TPFMacro only tracks MoM releases
+    (see lse_.py's MONTHLY_EVENT_PATTERNS) but the cross-section panel
+    needs YoY.
+
+    `mom_series` is oldest -> newest. Each output point compounds the
+    trailing 12 MoM readings ending at that month: (1+m1/100)*...*(1+m12/100)
+    - 1, as a %. Needs at least 12 MoM points to produce even one YoY
+    point, so the result is 11 points shorter than the input (empty if
+    there are fewer than 12).
+    """
+    if len(mom_series) < 12:
+        return []
+
+    yoy: list[float] = []
+    for i in range(11, len(mom_series)):
+        factor = 1.0
+        for mom in mom_series[i - 11 : i + 1]:
+            factor *= 1 + mom / 100
+        yoy.append((factor - 1) * 100)
+    return yoy
 
 
 def _classify_ring(composite_now: float, composite_prev: float) -> str:
@@ -415,6 +485,100 @@ class MacroController:
 
         except Exception as e:
             logging.error(f"Error getting global economic cycle: {e}", exc_info=True)
+            raise
+
+    async def get_cross_section_panel(self) -> dict:
+        """Build the panel shape the "Orthogonal View" frontend's
+        buildPanel() swap point requires:
+        {"US": {"cpi": [...60 YoY%...], "ppi": [...], "retailNom": [...],
+        "unemp": [...60 rate%...]}, ...}, oldest -> newest.
+
+        Two bridges from what TPFMacro actually stores to what that shape
+        wants:
+
+        - MoM -> YoY: LSE only publishes month-over-month releases for
+          cpi/ppi/retail/inflation (see lse_.py's MONTHLY_EVENT_PATTERNS),
+          not year-over-year, so cpi/ppi/retailNom are chained from MoM via
+          _mom_to_yoy() rather than read directly. unemp is already a rate
+          level, so it's used as-is, unchained.
+        - cpi vs inflation: some countries' calendars report headline
+          prices as "CPI MoM", others as "Inflation Rate MoM" - those land
+          in TPFMacro's separate `cpi` and `inflation` tables respectively.
+          Both represent the same real-world headline figure, so a
+          country's `cpi` field here prefers the `cpi` table and falls back
+          to `inflation` only if that country has no `cpi` history.
+
+        A country is omitted entirely if any of the four series doesn't
+        have PANEL_MONTHS points yet (e.g. too little sync history) -
+        better than handing the frontend a partially-populated series it
+        has no way to flag as incomplete.
+        """
+        try:
+            # +11 so chaining 12-point MoM windows still yields PANEL_MONTHS
+            # YoY points at the end (each YoY point consumes 12 MoM points).
+            mom_months = PANEL_MONTHS + 11
+            cpi_mom, inflation_mom, ppi_mom, retail_mom, unemp_levels = await asyncio.gather(
+                self.model.get_monthly_series("cpi", months=mom_months),
+                self.model.get_monthly_series("inflation", months=mom_months),
+                self.model.get_monthly_series("ppi", months=mom_months),
+                self.model.get_monthly_series("retail", months=mom_months),
+                self.model.get_monthly_series("unemp", months=PANEL_MONTHS),
+            )
+
+            panel: dict[str, dict] = {}
+
+            for tpf_code, xs_code in XS_COUNTRY_CODES.items():
+                # (report_date, index_value) pairs, oldest -> newest.
+                cpi_points = cpi_mom.get(tpf_code) or inflation_mom.get(tpf_code) or []
+                ppi_points = ppi_mom.get(tpf_code) or []
+                retail_points = retail_mom.get(tpf_code) or []
+                unemp_points = (unemp_levels.get(tpf_code) or [])[-PANEL_MONTHS:]
+
+                cpi_series = [value for _, value in cpi_points]
+                ppi_series = [value for _, value in ppi_points]
+                retail_series = [value for _, value in retail_points]
+                unemp_series = [value for _, value in unemp_points]
+
+                cpi_yoy = _mom_to_yoy(cpi_series)[-PANEL_MONTHS:]
+                ppi_yoy = _mom_to_yoy(ppi_series)[-PANEL_MONTHS:]
+                retail_yoy = _mom_to_yoy(retail_series)[-PANEL_MONTHS:]
+
+                if not (
+                    len(cpi_yoy) == PANEL_MONTHS
+                    and len(ppi_yoy) == PANEL_MONTHS
+                    and len(retail_yoy) == PANEL_MONTHS
+                    and len(unemp_series) == PANEL_MONTHS
+                ):
+                    continue  # not enough synced history yet for this country
+
+                # Now that get_monthly_series() hands back real dates
+                # instead of bare values, a country's most recent reading
+                # can actually be checked for staleness - a panel with
+                # exactly PANEL_MONTHS points can still be built from data
+                # that stopped syncing months ago, and length alone can't
+                # tell the two apart.
+                latest_date = max(
+                    points[-1][0]
+                    for points in (cpi_points, ppi_points, retail_points, unemp_points)
+                    if points
+                )
+                if datetime.now() - latest_date > timedelta(days=STALE_DATA_DAYS):
+                    logging.warning(
+                        f"Cross-section panel for {xs_code}: most recent reading is from "
+                        f"{latest_date.date()}, older than {STALE_DATA_DAYS} days - sync may be stalled."
+                    )
+
+                panel[xs_code] = {
+                    "cpi": cpi_yoy,
+                    "ppi": ppi_yoy,
+                    "retailNom": retail_yoy,
+                    "unemp": unemp_series,
+                }
+
+            return panel
+
+        except Exception as e:
+            logging.error(f"Error building cross-section panel: {e}", exc_info=True)
             raise
 
     async def get_global_avg(self):

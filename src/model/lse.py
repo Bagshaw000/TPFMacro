@@ -86,6 +86,58 @@ class LSEModel:
             logging.error(f"Error getting trailing stats for {table}: {e}", exc_info=True)
             raise
 
+    async def get_monthly_series(self, table: str, months: int = 72) -> dict[str, List[tuple]]:
+        """The last `months` monthly (report_date, index_value) readings per
+        country for `table`, oldest -> newest - paired with each reading's
+        actual release date, not bare values, so a caller can tell how
+        fresh a series is (e.g. detect a stalled sync) or align chained
+        output back to real calendar months, instead of having to assume
+        the series is gap-free and its last point is "now". Raw input for
+        chaining a MoM series into an approximate YoY series (see
+        controller/macro.py's _mom_to_yoy), since the LSE-sourced
+        cpi/ppi/retail/inflation releases are all month-over-month, not
+        year-over-year.
+
+        Fetches every row within a generous cutoff (a few months more than
+        requested, to absorb irregular release timing) in one query, then
+        groups/sorts/trims to the last `months` per country in Python -
+        cheaper than a per-country windowed query for the country counts
+        this app tracks.
+        """
+        try:
+            if table not in ECON_INDICATOR_TYPES:
+                raise ValueError(f"Unknown indicator table: {table}")
+
+            cutoff = datetime.now() - timedelta(days=31 * (months + 2))
+
+            async with session_scope() as session:
+                query = text(f"""
+                    SELECT country_code, report_date, index_value
+                    FROM {table}
+                    WHERE report_date >= :cutoff
+                    ORDER BY country_code, report_date
+                """).bindparams(cutoff=cutoff)
+
+                result = await session.exec(query)
+                rows = result.mappings().all()
+
+            by_country: dict[str, list[tuple[datetime, float]]] = {}
+            for row in rows:
+                if row["index_value"] is None:
+                    continue
+                by_country.setdefault(row["country_code"], []).append(
+                    (row["report_date"], row["index_value"])
+                )
+
+            return {
+                country: sorted(points)[-months:]
+                for country, points in by_country.items()
+            }
+
+        except Exception as e:
+            logging.error(f"Error getting monthly series for {table}: {e}", exc_info=True)
+            raise
+
     async def insert_event(self, data: List[_EconIndicatorWithForecast]) -> List[_EconIndicatorWithForecast]:
         try:
             if not data:
@@ -131,4 +183,4 @@ class LSEModel:
 
 if __name__ == "__main__":
     test = LSEModel()
-    print(asyncio.run(test.get_trailing_stats("cpi")))
+    print(asyncio.run(test.get_monthly_series("inflation")))

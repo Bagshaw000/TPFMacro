@@ -30,12 +30,14 @@ from arq import cron
 from .cot import COT
 from model.market_overview import MarketOverview
 from controller.macro import MacroController
+from controller.cross_section import CrossSectionController
 # from controller.cpi import CPIController
 # from controller.ppi import PPIController
 from controller.economic_event import EconomicEventController
 # from controller.gdp import GDPController
 # from controller.unemp import UNEMPController
 from controller.news import NewsSentimentController
+# from controller.cross_section import CrossSectionController
 
 
 try:
@@ -69,6 +71,7 @@ econ_event_ctrl = EconomicEventController()
 news_sentiment_ctrl = NewsSentimentController()
 lse_ctrl = LSEController()
 macro_ctrl = MacroController()
+cross_section_ctrl = CrossSectionController()
 
 # Each job below is an arq task function: arq always calls it with a `ctx`
 # dict (job context - not used by any of these), and the function's job is
@@ -112,6 +115,10 @@ async def refresh_factor_stats(ctx):
     await macro_ctrl.refresh_factor_stats()
     logging.info(f"Running factor stats refresh worker")
 
+async def refresh_cross_section(ctx):
+    await cross_section_ctrl.update_quandrant()
+    logging.info(f"Running Cross Section analysis")
+
 
 class WorkerSettings:
     # arq reads this class directly (via `arq worker.WorkerSettings`) to
@@ -147,6 +154,12 @@ class WorkerSettings:
         # (see controller/macro.py's STATS_TTL) well ahead of its 9-day
         # expiry without hitting Postgres on every economic-cycle read.
         cron(refresh_factor_stats, weekday="sun", hour=22, unique=True,
+            run_at_startup=False),
+        # 1st of every month at 22:30 - PPI->CPI lead is a structural read
+        # meant to be stable (see cross_section.py's module docstring on
+        # why it's estimated once and cached, not re-fit live), so a
+        # monthly cadence is plenty, well ahead of LEAD_TTL's 40-day expiry.
+        cron(refresh_cross_section, day={1, 10, 15, 20, 25}, hour=22, minute=30, unique=True,
             run_at_startup=False),
     ]
 
