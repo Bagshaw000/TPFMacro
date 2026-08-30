@@ -40,17 +40,27 @@ nats_router = NatsRouter("nats://localhost:4222/")
 async def lifespan(app: FastAPI):
     
    
-    load_dotenv()
-    asyncio.gather(market_overview.get_currency(), 
-                   nats_router.startup(), 
-                   cot_ctrl.setup_redis(),
-                   macro_ctrl.refresh_factor_stats(), 
-                   lse_ctrl.get_event_cal(), 
-                   cot_ctrl.instituitional_pos(),
-                   cross_sec.update_quandrant()) 
+    await nats_router.startup()
+    await cot_ctrl.setup_redis()
+    
+    # 3. Data loading (concurrent with error handling)
+    results = await asyncio.gather(
+        macro_ctrl.refresh_factor_stats(),
+        market_overview.get_currency(),
+        lse_ctrl.get_event_cal(),
+        cot_ctrl.instituitional_pos(),
+        cross_sec.update_quandrant(),
+        return_exceptions=True
+    )
+    
+    # 4. Log failures but continue
+    for result in results:
+        if isinstance(result, Exception):
+            logger.error(f"Startup task failed: {result}")
     
     yield
-    
+    await nats_router.shutdown()
+    await cot_ctrl.shutdown()
 
     
 app = FastAPI(lifespan=lifespan)
