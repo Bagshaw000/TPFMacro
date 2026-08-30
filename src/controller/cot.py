@@ -22,6 +22,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from custom_types.cot import CotData
 from database.redis_ import RedisConnection
 from model.cot import CotModell
+from controller.llm import LLMController
 import pandas as pd
 import numpy as np
 
@@ -47,6 +48,7 @@ class COTController:
         # (insert_cot_redis, setup_redis).
         self.aioredis = RedisConnection().get_async_redis()
         self.cot = CotModell()
+        self.llm = LLMController()
 
     #Get Cot data
     async def get_cot_data(self):
@@ -807,12 +809,17 @@ class COTController:
                 "instruments": list(metrics.keys()),
                 "updated": datetime.now().isoformat(),
             }
+            
+            
+            
 
             # One pipeline: N per-instrument JSON blobs + the _meta blob, all
             # with the same TTL, in a single round trip. Instrument names carry
             # spaces / "&" - fine inside a Redis key.
             pipe = self.aioredis.pipeline()
             for asset, cats in metrics.items():
+                llm_sum = await self.llm.breakdown_inst_positioning(cats)
+                cats["summary"] = llm_sum
                 pipe.set(f"{COT_POS_KEY_PREFIX}:{asset}", json.dumps(cats), ex=ttl)
             pipe.set(f"{COT_POS_KEY_PREFIX}:_meta", json.dumps(meta), ex=ttl)
             await pipe.execute()
@@ -866,7 +873,7 @@ class COTController:
             logging.error(f"Error getting positioning metrics from redis: {e}", exc_info=True)
             raise
         
-        
+    
 # if __name__ == "__main__":
 #     test = COTController()
 #     print(asyncio.run(test.instituitional_pos()))

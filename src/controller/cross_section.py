@@ -36,6 +36,7 @@ from model.lse import LSEModel                # Postgres access layer for the LS
 import asyncio
 import pandas as pd
 import numpy as np
+from controller.llm import LLMController
 # Inflation targets are fixed policy constants (central-bank-announced),
 # not something to derive from data - unlike NAIRU below. Keyed by
 # TPFMacro's own 3-letter codes, so this maps directly off full_df['country']
@@ -67,6 +68,12 @@ QUADRANT_TTL = 40 * 24 * 3600
 # a f"{QUADRANT_KEY_PREFIX}:_meta" blob with the cross-section medians.
 QUADRANT_KEY_PREFIX = "cross_section:quadrant"
 
+# Redis key + TTL for the LLM-written narrative of the current snapshot
+# (store_cross_section_breakdown output). One JSON blob: the summary text plus
+# when it was generated and which snapshot it describes.
+BREAKDOWN_KEY = "cross_section:breakdown"
+BREAKDOWN_TTL = 40 * 24 * 3600
+
 
 class CrossSectionController:
     """Orchestrates the full cross-section pipeline against real data: the
@@ -87,6 +94,7 @@ class CrossSectionController:
         # Shared async Redis connection (pool-backed, decode_responses=True, so
         # every value read back is already a str).
         self.redis = RedisConnection().get_async_redis()
+        self.llm = LLMController()
 
 
     async def load_data(self):
@@ -313,9 +321,15 @@ class CrossSectionController:
                     raw = 50 + 15 * z * config['sign']
                     return max(2, min(98, round(raw)))
 
+                # Run z_score_country once per country (its full multi-month
+                # sub-frame) and collect the results into a Series indexed by
+                # country - the same index as scores_df, so the two frames
+                # align column-for-column.
                 z_scores_df[f'score_{indicator}'] = df.groupby('country').apply(
                 lambda x: z_score_country(x)
             )
+            # scores_df: cross-sectional percentile (vs peers this month).
+            # z_scores_df: per-country z-score (vs that country's own history).
             return scores_df,z_scores_df
 
         except  Exception as e:
@@ -323,36 +337,47 @@ class CrossSectionController:
             raise
         
     async def calculate_composite(self, scores_df: pd.DataFrame):
-        """Blend the four per-factor scores into the axes the quadrant view
-        needs. The pipeline (update_quandrant) passes the z-score frame here,
-        but the maths works on either frame from normalized_factors().
+        """Blend the four per-factor scores from normalized_factors() into the
+        axes the quadrant view plots on.
 
-        Output columns, one row per country:
-          - price     : price-pressure axis, 0.55*cpiDev + 0.45*ppi
-          - demand    : demand-strength axis, 0.60*unempGap + 0.40*retMom
-          - composite : all four scores combined with their IND weights
-                        (0.275/0.225/0.30/0.20, summing to 1.0)
-          - contrib_* : each factor's weighted piece of `composite`
-                        (contrib_cpi + contrib_ppi + contrib_unemp +
-                        contrib_ret == composite), kept separate so a stacked
-                        bar chart can show each factor's contribution.
+        Input: one of the two frames normalized_factors() returns (columns
+        score_cpiDev / score_ppi / score_unempGap / score_retMom, indexed by
+        country). update_quandrant() passes the z-score frame; the arithmetic
+        works on either.
 
-        Because these are plain sums, a NaN in any input score propagates to
-        NaN in price / demand / composite for that country.
+        Every input score is already sign-adjusted so higher = healthier, so:
+          - price   = 0.55*score_cpiDev + 0.45*score_ppi
+                      -> HIGH price = inflation CONTAINED (at/below target, soft
+                      producer prices); LOW price = inflation running hot.
+          - demand  = 0.60*score_unempGap + 0.40*score_retMom
+                      -> HIGH demand = tight labour market + accelerating real
+                      retail; LOW demand = slack + stalling retail.
+          - composite = all four scores weighted by IND['*']['weight']
+                        (0.275/0.225/0.30/0.20, summing to 1.0) - one headline
+                        health number.
+          - contrib_* = each factor's weighted term of `composite`, kept
+                        separately so a stacked bar can show the four pieces
+                        (they add up to `composite`).
+
+        NaN propagation: these are plain sums, so if any one input score is NaN
+        for a country (an indicator was missing upstream), that country's
+        price / demand / composite all come out NaN.
         """
         try:
+            # One row per country, same index as the incoming scores frame.
             result = pd.DataFrame(index=scores_df.index)
 
-            # 1. Price-pressure axis: inflation deviation and producer prices.
-            #    The input scores are already sign-adjusted by normalized_factors.
+            # 1. Price axis: CPI-vs-target score (55%) + producer-price score
+            #    (45%). Rounded for a clean 0-100 display value.
             result['price'] = (0.55 * scores_df['score_cpiDev'] +
                             0.45 * scores_df['score_ppi']).round()
 
-            # 2. Demand axis: labour-market slack and retail momentum.
+            # 2. Demand axis: unemployment-gap score (60%) + retail-momentum
+            #    score (40%).
             result['demand'] = (0.60 * scores_df['score_unempGap'] +
                             0.40 * scores_df['score_retMom']).round()
 
-            # 3. Single headline number: weighted sum of all four factor scores.
+            # 3. Composite: all four factor scores, each times its IND weight.
             result['composite'] = (
                 scores_df['score_cpiDev'] * IND['cpiDev']['weight'] +
                 scores_df['score_ppi'] * IND['ppi']['weight'] +
@@ -360,8 +385,9 @@ class CrossSectionController:
                 scores_df['score_retMom'] * IND['retMom']['weight']
             ).round()
 
-            # 4. The individual weighted terms behind `composite` (unrounded),
-            #    for stacked-bar rendering on the frontend.
+            # 4. The individual weighted terms behind `composite` (left
+            #    unrounded so they still sum exactly to it) - for stacked-bar
+            #    rendering on the frontend.
             result['contrib_cpi'] = scores_df['score_cpiDev'] * IND['cpiDev']['weight']
             result['contrib_ppi'] = scores_df['score_ppi'] * IND['ppi']['weight']
             result['contrib_unemp'] = scores_df['score_unempGap'] * IND['unempGap']['weight']
@@ -374,41 +400,49 @@ class CrossSectionController:
             raise
         
     async def assign_quadrants(self, composite_df: pd.DataFrame) -> pd.DataFrame:
-        """Label each country by which quadrant of the price/demand plane it
-        sits in, splitting on the cross-section median of each axis.
+        """Place each country in one quadrant of the price/demand plane,
+        splitting each axis at the cross-section median.
 
-            demand high + price high  -> Overheating
-            demand low  + price high  -> Weak
-            demand high + price low   -> Goldilocks
-            demand low  + price low   -> Stagflation
+        Mutates `composite_df` in place - adds `quadrant`, `price_median`,
+        `demand_median` - and returns it.
 
-        Mutates `composite_df` in place (adds `quadrant`, `price_median`,
-        `demand_median`) and returns it.
+        As coded, the four cases map to:
+            price above median + demand above median -> "Overheating"
+            price above median + demand below median -> "Weak"
+            price below median + demand above median -> "Goldilocks"
+            price below median + demand below median -> "Stagflation"
 
-        Caveat: a country with NaN price or demand (an indicator was missing
-        upstream) compares False on every ">" test, so it lands in the
-        low/low bucket ("Stagflation") rather than the `default` of
-        "Unclassified". Guard on notna() before trusting a label for a country
-        known to have gaps.
+        KNOWN LABEL BUG: `price` is health-oriented (high = inflation
+        *contained*, low = inflation *hot* - see calculate_composite), so the
+        economic reality of the top-left/top-right cases is the reverse of the
+        names: "price high + demand high" is actually Goldilocks (firm demand,
+        no inflation) and "price low + demand high" is actually Overheating.
+        Only "Stagflation" is labelled correctly; "Weak" is roughly right.
+        Swap the 'Overheating' and 'Goldilocks' strings in `choices` to fix.
+
+        NaN caveat: a country with NaN price or demand (missing indicator
+        upstream) compares False on every '>' test, so it falls into the
+        low/low branch and gets a real label rather than the `default`
+        'Unclassified'. Filter on notna() before trusting a gap-prone
+        country's quadrant.
         """
         try:
-            # Split lines: the median price and median demand across all
-            # countries in this cross-section.
+            # Split lines: median price and median demand across all countries
+            # in this cross-section (NaN-skipping).
             price_median = composite_df['price'].median()
             demand_median = composite_df['demand'].median()
 
-            # Boolean column masks, evaluated for every country at once.
+            # Per-country boolean masks, evaluated for every row at once.
             price_high = composite_df['price'] > price_median
             demand_high = composite_df['demand'] > demand_median
 
-            # np.select walks the conditions in order and picks the first that
-            # is True for each row; the four cases are mutually exclusive and
-            # exhaustive for non-NaN rows.
+            # np.select takes the first condition that is True for each row.
+            # The four cases are mutually exclusive and cover every non-NaN row.
             conditions = [
-                (price_high & demand_high),      # Overheating
-                (price_high & ~demand_high),     # Weak
-                (~price_high & demand_high),     # Goldilocks
-                (~price_high & ~demand_high)     # Stagflation
+                (price_high & demand_high),      # -> choices[0]
+                (price_high & ~demand_high),     # -> choices[1]
+                (~price_high & demand_high),     # -> choices[2]
+                (~price_high & ~demand_high)     # -> choices[3]
             ]
 
             choices = ['Overheating', 'Weak', 'Goldilocks', 'Stagflation']
@@ -436,13 +470,8 @@ class CrossSectionController:
         pipeline so the whole snapshot lands in a single round trip.
         """
         try:
-            # to_json(orient="index") -> {code: {column: value, ...}, ...} with
-            # NaN rendered as JSON null. Round-tripping through json.loads gives
-            # a plain dict so we can re-serialise each country separately.
             per_country = json.loads(composite_df.to_json(orient="index"))
 
-            # median() skips NaN; the result is still NaN if a whole column is
-            # empty, so coerce that to None for valid JSON.
             medians = composite_df[["price", "demand"]].median()
             meta = {
                 "price_median": None if pd.isna(medians["price"]) else float(medians["price"]),
@@ -451,8 +480,6 @@ class CrossSectionController:
                 "updated": pd.Timestamp.now(tz="UTC").isoformat(),
             }
 
-            # Queue every write on one pipeline: N per-country keys + the
-            # _meta key, all with the same TTL, sent in a single round trip.
             pipeline = self.redis.pipeline()
             for code, row in per_country.items():
                 pipeline.set(f"{QUADRANT_KEY_PREFIX}:{code}", json.dumps(row), ex=ttl)
@@ -465,26 +492,36 @@ class CrossSectionController:
     def performance_trend(self, full_df: pd.DataFrame, quarters: int = 8) -> dict:
         """Quarterly percentile-over-time comparison: for each of the last
         `quarters` quarters, rank every country against its peers on each
-        indicator, then blend the ranks into one composite per country per
-        quarter.
+        indicator, then blend those ranks into one composite per country per
+        quarter. This is the "compare all economies over time" view, separate
+        from the single-snapshot Phillips-curve quadrant above.
 
-        Returns {'quarters': [...], 'per_indicator': {name: DataFrame},
-        'composite': DataFrame} - the per_indicator / composite frames are
-        indexed by country, one column per quarter.
+        Returns {'quarters': [Timestamp, ...],
+                 'per_indicator': {indicator: DataFrame(country x quarter)},
+                 'composite': DataFrame(country x quarter)}.
 
-        NOTE: this method expects `full_df` to have a quarterly-resamplable
-        DatetimeIndex and a (date, country) level structure (so `.resample`,
-        `quarterly.index.get_level_values('country')` and
-        `quarterly.xs(q, level='date')` all work). The long-form frame that
-        load_data() returns has a plain RangeIndex with date/country as
-        columns, so it must be reshaped (set a DatetimeIndex, group by country)
-        before being passed here - calling this directly on load_data()[0]
-        raises "Only valid with DatetimeIndex...".
+        TWO KNOWN ISSUES with the code as it currently stands:
+
+        1. Input shape. `full_df.resample('Q')` and
+           `quarterly.xs(q, level='date')` require `full_df` to carry a
+           quarterly-resamplable DatetimeIndex with a (date, country) level
+           structure. load_data() returns a long-form frame with a plain
+           RangeIndex and date/country as columns, so passing that directly
+           raises "Only valid with DatetimeIndex...". It must be reshaped
+           (set a DatetimeIndex, group by country) first.
+
+        2. Key mismatch. The loop iterates `IND` (keys cpiDev / ppi /
+           unempGap / retMom) and indexes `quarterly[indicator]`, but the
+           agg below produces columns cpi / ppi / retail / unemp - so only
+           'ppi' lines up. Step 5 then reads per_indicator['cpi'] /
+           ['unemp'] / ['retail'], which the IND-keyed loop never created.
+           Either agg into cpiDev/unempGap/retMom or iterate the raw column
+           names.
         """
         try:
-            # 1. Collapse each quarter to a single number per indicator.
-            #    cpi/ppi/retail: percentage change from the quarter's first
-            #    reading to its last. unemp: the quarter's last reading.
+            # 1. Collapse each quarter to one number per indicator.
+            #    cpi/ppi/retail: percent change from the quarter's first
+            #    reading to its last. unemp: the quarter's final reading.
             quarterly = full_df.resample('Q').agg({
                 'cpi': lambda x: (x.iloc[-1] / x.iloc[0] - 1) * 100,  # Quarter change
                 'ppi': lambda x: (x.iloc[-1] / x.iloc[0] - 1) * 100,
@@ -495,9 +532,9 @@ class CrossSectionController:
             # 2. Keep only the most recent `quarters` rows.
             last_n_quarters = quarterly.tail(quarters)
 
-            # 3. For every indicator, build a country x quarter frame of
-            #    cross-sectional percentile ranks (sign-adjusted so higher =
-            #    healthier, same convention as IND).
+            # 3. Per indicator, build a country x quarter frame of
+            #    cross-sectional percentile ranks (sign-adjusted via IND so
+            #    higher = healthier, same convention as the snapshot pipeline).
             per_indicator = {}
             composite = pd.DataFrame(index=quarterly.index.get_level_values('country').unique())
 
@@ -506,8 +543,8 @@ class CrossSectionController:
                 for q in last_n_quarters.index:
                     # All countries' values for this one quarter.
                     values = quarterly.xs(q, level='date')[indicator]
-                    signed_values = values * config['sign']
-                    ranks = signed_values.rank(pct=True) * 100
+                    signed_values = values * config['sign']       # flip so bigger = healthier
+                    ranks = signed_values.rank(pct=True) * 100     # 0-100 percentile
                     quarter_ranks.append(ranks)
 
                 # One column per quarter, labelled by the quarter timestamp.
@@ -515,10 +552,11 @@ class CrossSectionController:
                 ranks_df.columns = last_n_quarters.index
                 per_indicator[indicator] = ranks_df
 
-            # 4. Weighted blend of the four indicator ranks, quarter by quarter.
+            # 4. Weighted blend of the four indicator ranks, quarter by quarter
+            #    (weights: 0.275 / 0.225 / 0.30 / 0.20, summing to 1.0).
             for i, q in enumerate(last_n_quarters.index):
                 composite[q] = (
-                    per_indicator['cpi'].iloc[:, i] * 0.30 +
+                    per_indicator['cpi'].iloc[:, i] * 0.275 +
                     per_indicator['ppi'].iloc[:, i] * 0.225 +
                     per_indicator['unemp'].iloc[:, i] * 0.30+
                     per_indicator['retail'].iloc[:, i] * 0.20
@@ -534,32 +572,39 @@ class CrossSectionController:
             raise
         
     async def update_quandrant(self):
-        """Run the whole quadrant pipeline once and cache the result. Intended
-        to be triggered on a schedule (e.g. after each monthly release batch).
-        Read the cached output with get_cross_section().
+        """Run the whole Phillips-curve / quadrant pipeline end to end and
+        cache the results. Meant to be triggered on a schedule (e.g. after the
+        monthly release batch lands). Read the cached output back with
+        get_cross_section().
         """
         try:
             data = await self.load_data()                                   # (df_by_country, country_stats)
-            eco_data = await self.derived_economic_standard(data[0])        # standardised factors
+            eco_data = await self.derived_economic_standard(data[0])        # cpiDev / ppi / unempGap / retReal / retMom
             normalized_data = await self.normalized_factors(eco_data)       # (percentile_scores, z_scores)
-            composite = await self.calculate_composite(normalized_data[1])  # pipeline uses the z-score frame
+            composite = await self.calculate_composite(normalized_data[1])  # z-score frame -> price / demand / composite
             quandrant = await self.assign_quadrants(composite)              # + quadrant / median columns
             await self.store_quadrants(quandrant)                           # write per-country blobs to Redis
+            await self.store_cross_section_breakdown()                      # then have the LLM narrate the fresh snapshot
         except Exception as e:
             logging.error(f"Error updating the quandrant:{e}", exc_info=True)
             raise
         
-    async def get_cross_section(self) -> dict:
+    async def get_cross_section(self, include_summary: bool = True) -> dict:
         """Read the cached quadrant snapshot back out of Redis - the inverse of
         store_quadrants(). Returns
         {"meta": {...}, "countries": {code: {price, demand, composite,
-        contrib_*, quadrant, price_median, demand_median}}} with whatever
-        per-country blobs are still live. An empty "countries" dict means the
-        cache has expired or update_quandrant() has never run.
+        contrib_*, quadrant, price_median, demand_median}}, "summary": {...}}
+        with whatever per-country blobs are still live. An empty "countries"
+        dict means the cache has expired or update_quandrant() has never run.
+
+        `summary` is the cached LLM narrative
+        (store_cross_section_breakdown output: {"summary", "updated",
+        "source_updated"}) or None if none is cached. Pass
+        include_summary=False to skip that read - store_cross_section_breakdown
+        does, so the narrative it feeds the LLM never contains a previous
+        narrative.
         """
         try:
-            # decode_responses=True on the pool means these come back as str
-            # (or None when the key has expired / never existed).
             meta_raw = await self.redis.get(f"{QUADRANT_KEY_PREFIX}:_meta")
             meta = json.loads(meta_raw) if meta_raw else {}
 
@@ -574,35 +619,84 @@ class CrossSectionController:
                     if not key.endswith(":_meta")
                 ]
 
-            # Nothing cached at all - hand back an empty result rather than error.
-            if not codes:
-                return {"meta": meta, "countries": {}}
+            if codes:
+                pipeline = self.redis.pipeline()
+                for code in codes:
+                    pipeline.get(f"{QUADRANT_KEY_PREFIX}:{code}")
+                rows = await pipeline.execute()
+                countries = {
+                    code: json.loads(row)
+                    for code, row in zip(codes, rows)
+                    if row is not None
+                }
+            else:
+                countries = {}
 
-            # One GET per country, batched into a single round trip.
-            pipeline = self.redis.pipeline()
-            for code in codes:
-                pipeline.get(f"{QUADRANT_KEY_PREFIX}:{code}")
-            rows = await pipeline.execute()
-
-            # Drop any country whose own key expired between the _meta read and
-            # this pipeline (row is None).
-            countries = {
-                code: json.loads(row)
-                for code, row in zip(codes, rows)
-                if row is not None
-            }
-            return {"meta": meta, "countries": countries}
+            result = {"meta": meta, "countries": countries}
+            if include_summary:
+                result["summary"] = await self.get_cross_section_breakdown() or None
+            return result
         except Exception as e:
             logging.error(f"Error getting cross section: {e}", exc_info=True)
             raise
     
-# Manual smoke-test harness, kept commented out so importing this module has
-# no side effects. Uncomment the stage(s) you want to exercise:
-#   - the full write path builds the snapshot and stores it, then
-#   - get_cross_section() reads it straight back from Redis.
-# Requires a reachable Postgres and Redis (set REDIS_HOST for a local run).
+    async def store_cross_section_breakdown(self, ttl: int = BREAKDOWN_TTL) -> str | None:
+        """Read the cached quadrant snapshot, have the LLM write a narrative of
+        it (global_breakdown), and cache that narrative in Redis at
+        BREAKDOWN_KEY as {"summary", "updated", "source_updated"}. Returns the
+        summary text (or None if there was nothing to summarise).
+        """
+        try:
+            # include_summary=False: feed the LLM only the raw snapshot, never
+            # a previously cached narrative.
+            data = await self.get_cross_section(include_summary=False)
+
+            # Nothing cached to describe -> don't spend an LLM call or overwrite
+            # a good previous narrative with an empty one.
+            if not data.get("countries"):
+                logging.info("No cross-section snapshot to summarise")
+                return None
+
+            summary = await self.llm.global_breakdown(data)
+            if not summary:
+                logging.info("Empty cross-section summary from LLM")
+                return None
+
+            payload = {
+                "summary": summary,
+                "updated": pd.Timestamp.now(tz="UTC").isoformat(),
+                # tie the narrative to the snapshot it was written from
+                "source_updated": data.get("meta", {}).get("updated"),
+            }
+            await self.redis.set(BREAKDOWN_KEY, json.dumps(payload), ex=ttl)
+            return summary
+        except Exception as e:
+            logging.error(f"Error break down cross section breakdown: {e}", exc_info=True)
+            raise
+
+    async def get_cross_section_breakdown(self) -> dict:
+        """Read the cached LLM narrative back out of Redis - the inverse of
+        store_cross_section_breakdown(). Returns the stored
+        {"summary", "updated", "source_updated"} dict, or {} if none is cached.
+        """
+        try:
+            raw = await self.redis.get(BREAKDOWN_KEY)
+            return json.loads(raw) if raw else {}
+        except Exception as e:
+            logging.error(f"Error getting cross section breakdown: {e}", exc_info=True)
+            raise
+
+
+# Manual smoke-test harness, guarded so importing this module has no side
+# effects. Needs a reachable Postgres + Redis (set REDIS_HOST for a local run)
+# and, for store_cross_section_breakdown, a working LLM key.
+#
+# The active line summarises whatever snapshot is already cached. To rebuild
+# the snapshot first, run update_quandrant() instead - or step through the
+# pipeline stage by stage using the commented lines below.
 # if __name__ == "__main__":
 #     test = CrossSectionController()
+#     print(asyncio.run(test.store_cross_section_breakdown()))
 #     # val = asyncio.run(test.load_data())
 #     # val2 = asyncio.run(test.derived_economic_standard(val[0]))
 #     # val3 = asyncio.run(test.normalized_factors(val2))

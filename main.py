@@ -56,11 +56,11 @@ async def lifespan(app: FastAPI):
     # 4. Log failures but continue
     for result in results:
         if isinstance(result, Exception):
-            logger.error(f"Startup task failed: {result}")
+            logging.error(f"Startup task failed: {result}")
     
     yield
     await nats_router.shutdown()
-    await cot_ctrl.shutdown()
+    # await cot_ctrl.shutdown()
 
     
 app = FastAPI(lifespan=lifespan)
