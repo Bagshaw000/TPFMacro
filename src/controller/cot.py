@@ -25,6 +25,17 @@ from model.cot import CotModell
 import pandas as pd
 import numpy as np
 
+# Redis key prefix for the cached institutional-positioning snapshot
+# (instituitional_pos output). One JSON blob per instrument at
+# f"{COT_POS_KEY_PREFIX}:{asset}", plus a f"{COT_POS_KEY_PREFIX}:_meta" blob
+# with the instrument list and an update timestamp.
+COT_POS_KEY_PREFIX = "cot_pos"
+
+# TTL on that snapshot. COT is released weekly, so this is a staleness guard
+# for a stalled refresh - roughly a month, several release cycles of margin.
+COT_POS_TTL = 30 * 24 * 3600
+
+
 class COTController:
 
     def __init__(self):
@@ -518,6 +529,344 @@ class COTController:
             logging.error(f"Error setting up redis: {e}", exc_info=True)
             raise
 
+    # Trader categories scored for positioning, each as (long_field, short_field).
+    # `asset_mgr` is the institutional / "real money" bucket - the headline here;
+    # `lev_money` (hedge funds / CTAs - "fast money") and `dealer` (sell-side
+    # counterparty) are carried alongside so the frontend can show divergences
+    # (e.g. institutions crowded long while fast money is crowded short).
+    _POS_LEGS = {
+        "asset_mgr": ("asset_mgr_positions_long_all", "asset_mgr_positions_short_all"),
+        "lev_money": ("lev_money_positions_long_all", "lev_money_positions_short_all"),
+        "dealer":    ("dealer_positions_long_all",    "dealer_positions_short_all"),
+    }
 
-# test = COTController()
-# val = asyncio.run(test.setup_redis())
+    @staticmethod
+    def _crowding_label(percentile: float) -> str | None:
+        """Bucket a 0-100 positioning percentile into a crowding label.
+
+        The cut points are deliberately symmetric around the 40-60 "balanced"
+        band: 5 / 20 / 40 / 60 / 80 / 95. The outer 5-point tails are the
+        genuine extremes ("crowded"); the 80/95 and 5/20 bands are the
+        approach to them ("stretched" / "leaning"). Tighten the tails (e.g.
+        3/97) for a rarer signal.
+        """
+        if pd.isna(percentile):
+            return None                       # no score -> no label
+        if percentile >= 95: return "crowded long"
+        if percentile >= 80: return "stretched long"
+        if percentile >= 60: return "leaning long"
+        if percentile >  40: return "balanced"
+        if percentile >  20: return "leaning short"
+        if percentile >   5: return "stretched short"
+        return                    "crowded short"
+
+    def _positioning_metrics(self, data: dict, window: int = 52, min_w: int = 26) -> dict:
+        """Vectorised positioning percentile / z-score / momentum for every
+        instrument in `data` ({asset: {report_date: redis_hash}}, oldest-first).
+
+        For each trader category in `_POS_LEGS`, on the most recent week:
+          - net_pct_oi : (long - short) / open_interest, as a percent. Normalising
+                         by OI makes the number comparable across instruments and
+                         across time (OI drifts up as a market grows).
+          - percentile : rank of that net_pct_oi within the instrument's own
+                         trailing `window` weeks, 0-100. This is the "crowded"
+                         gauge - >=95 = most bullish positioning in the window,
+                         <=5 = most bearish. Ranking by value (not by slot) means
+                         a missing weekly report doesn't corrupt it.
+          - score      : 2*percentile - 100, i.e. -100 (max short) .. +100 (max long).
+          - z          : (net_pct_oi - rolling mean) / rolling std (population).
+                         Secondary read - "how many sigmas from normal". Can
+                         disagree with `percentile` when the positioning history
+                         is skewed; that gap is itself informative.
+          - mom_4w     : 4-week change in net_pct_oi (percentage points) - is the
+                         crowding still building or already unwinding.
+          - label      : `_crowding_label(percentile)`.
+
+        Returns {asset: {category: {metric: value}}}. Instruments with fewer than
+        `min_w` usable weeks are dropped (percentile would be noise).
+
+        `window` defaults to 52 because instituitional_pos() only pulls the last
+        52 weekly rows from Redis; widen both once a longer history is available
+        (3 years / 156 weeks is the convention for true positioning extremes).
+        """
+        try:
+            # ----------------------------------------------------------------
+            # STEP 1 - Flatten the nested dict into ONE tidy DataFrame holding
+            # every instrument's weekly rows stacked together.
+            #
+            # Decision: one combined frame rather than a per-instrument loop.
+            # It lets every calculation below run as a single vectorised pandas
+            # op over all ~11 instruments at once; per-instrument isolation is
+            # then handled by groupby, not by Python iteration.
+            # ----------------------------------------------------------------
+            rows = [
+                {"instrument": asset, "date": date, **hash_data}
+                for asset, by_date in data.items()
+                for date, hash_data in by_date.items()
+            ]
+            if not rows:
+                return {}                       # nothing came back from Redis
+            df = pd.DataFrame(rows)
+
+            # Redis hashes are all strings, and CFTC uses "." for a missing
+            # value - errors="coerce" turns any unparseable cell into NaN
+            # instead of raising, so one bad row can't sink the whole batch.
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+
+            # The only numeric columns we need: each category's long/short legs
+            # plus open interest. df.get-style guard (`col in df.columns`)
+            # covers an instrument whose hash is missing a category entirely.
+            legs = {field for pair in self._POS_LEGS.values() for field in pair}
+            for col in legs | {"open_interest_all"}:
+                df[col] = pd.to_numeric(df[col], errors="coerce") if col in df.columns else np.nan
+
+            # Drop rows with an unparseable date, then sort chronologically
+            # within each instrument - the rolling windows and the "take the
+            # last row" step below both depend on ascending date order. The
+            # caller already returns oldest-first, but sorting makes this
+            # method correct regardless of input order.
+            df = df.dropna(subset=["date"]).sort_values(["instrument", "date"])
+
+            # net-%-of-OI needs a positive denominator. .where(> 0) nulls out
+            # any row with missing / zero / negative OI; that row's metrics
+            # then come out NaN and are skipped when the results are assembled.
+            oi = df["open_interest_all"].where(df["open_interest_all"] > 0)
+
+            # ----------------------------------------------------------------
+            # STEP 2 - For each trader category, derive the positioning metrics.
+            #
+            # `metrics` is pre-seeded with an empty dict per instrument so the
+            # assembly loop can just fill in whichever categories produced a
+            # usable number.
+            # ----------------------------------------------------------------
+            metrics: dict = {inst: {} for inst in df["instrument"].unique()}
+            for cat, (long_f, short_f) in self._POS_LEGS.items():
+                # 2a. Normalised position: this category's net contracts as a
+                #     fraction of the instrument's total open interest. Dividing
+                #     by OI (per row, so each instrument by its own OI) makes
+                #     the number comparable across instruments and across time.
+                net_oi = (df[long_f] - df[short_f]) / oi
+
+                # 2b. Group by instrument so every rolling calc below stays
+                #     inside one instrument's own history - a window never
+                #     bleeds VIX data into FED FUNDS. transform() returns a
+                #     Series index-aligned to df, so pct / mean / std / mom all
+                #     line up row-for-row and can be combined directly.
+                by_inst = net_oi.groupby(df["instrument"])
+
+                # 2c. Percentile: where each week's net_oi ranks within its own
+                #     trailing `window` weeks (0-100). min_periods=min_w lets a
+                #     short history still produce a value once it has min_w
+                #     points, instead of staying all-NaN until the full window
+                #     fills. pandas' rank(pct=True) uses the rank/n convention
+                #     (a unique window max scores exactly 100).
+                pct = by_inst.transform(
+                    lambda s: s.rolling(window, min_periods=min_w).rank(pct=True) * 100
+                )
+
+                # 2d. Z-score inputs over the same window. ddof=0 (population
+                #     std): the window IS the full reference set being compared
+                #     against, not a sample drawn from something larger.
+                mean = by_inst.transform(lambda s: s.rolling(window, min_periods=min_w).mean())
+                std = by_inst.transform(lambda s: s.rolling(window, min_periods=min_w).std(ddof=0))
+                # replace(0, NaN): a perfectly flat window has 0 std -> the
+                #     z-score is undefined, so emit NaN rather than divide by 0.
+                z = (net_oi - mean) / std.replace(0, np.nan)
+
+                # 2e. Momentum: 4-week (~1 month) change in net_oi, still in
+                #     OI-fraction terms. shift(4) is per-instrument (it's on the
+                #     grouped object), so it can't pull a value from a different
+                #     instrument at the series boundary.
+                mom = net_oi - by_inst.shift(4)
+
+                # 2f. Bundle the derived columns, rounding for presentation, and
+                #     keep only the most recent row per instrument - that row is
+                #     "today's" positioning read. Building it as a frame first
+                #     keeps every column aligned to the same rows.
+                latest = pd.DataFrame({
+                    "instrument": df["instrument"],
+                    "net_pct_oi": (net_oi * 100).round(2),   # fraction -> percent
+                    "percentile": pct.round(1),
+                    "score": (2 * pct - 100).round(),        # 0..100 -> -100..+100
+                    "z": z.round(2),
+                    "mom_4w": (mom * 100).round(2),          # fraction -> percentage points
+                }).groupby("instrument").tail(1)
+
+                # 2g. Assemble the output. Only ~11 rows here, so a plain
+                #     iterrows loop is fine. numpy scalars are cast to native
+                #     float/int and NaN -> None so the dict serialises to clean
+                #     JSON in store_positioning().
+                for _, r in latest.iterrows():
+                    if pd.isna(r["percentile"]):
+                        continue  # instrument has fewer than min_w weeks - skip
+                    metrics[r["instrument"]][cat] = {
+                        "net_pct_oi": None if pd.isna(r["net_pct_oi"]) else float(r["net_pct_oi"]),
+                        "percentile": float(r["percentile"]),
+                        "score": None if pd.isna(r["score"]) else int(r["score"]),
+                        "z": None if pd.isna(r["z"]) else float(r["z"]),
+                        "mom_4w": None if pd.isna(r["mom_4w"]) else float(r["mom_4w"]),
+                        "label": self._crowding_label(r["percentile"]),
+                    }
+
+            # Drop instruments that produced no category at all (e.g. every
+            # category short on history), so callers only see real results.
+            return {inst: cats for inst, cats in metrics.items() if cats}
+        except Exception as e:
+            logging.error(f"Error computing positioning metrics: {e}", exc_info=True)
+            raise
+
+    async def instituitional_pos(self):
+        """Institutional (asset-manager) positioning per instrument, plus
+        leveraged-money and dealer positioning for context.
+
+        Pulls the last 52 weekly COT reports for a curated instrument list from
+        Redis, then runs `_positioning_metrics` to turn each trader category's
+        net position into a crowding percentile / z-score / momentum on the most
+        recent week. Returns {asset: {category: {metric: value}}}.
+        """
+        try:
+            # Curated instrument shortlist, grouped by the `market` label used
+            # in the Redis key (cot_ttf:{market}:{asset}:{date}). Only these
+            # are scored - the full cot_ttf set has hundreds of contracts, most
+            # irrelevant to a macro positioning view.
+            asset_list = {
+                "Currency": ["AUSTRALIAN DOLLAR", "EURO FX", "USD INDEX", "BRITISH POUND", "JAPANESE YEN"],
+                "Crypto": ["BITCOIN"],
+                "Indices": ["S&P 500 STOCK INDEX", "S&P 500 VIX","DOW JONES INDUSTRIAL AVERAGE"],
+                "Financial":["FED FUNDS", "UST 10Y NOTE"]
+            }
+
+            async def get_last_52(market: str, asset: str):
+                """Fetch one instrument's most recent 52 weekly COT hashes."""
+                pattern = f"cot_ttf:{market}:{asset}:*"
+
+                # SCAN (non-blocking) rather than KEYS. count=100 is a hint for
+                # how much work per SCAN call, not a limit on results.
+                keys = [k async for k in self.aioredis.scan_iter(match=pattern, count=100)]
+                if not keys:
+                    return asset, {}          # instrument not in cache
+
+                # Keys end in an ISO date (YYYY-MM-DD), which sorts
+                # lexicographically == chronologically, so reverse sort puts
+                # the newest first; take 52 (~1 year of weekly reports).
+                recent_keys = sorted(keys, reverse=True)[:52]
+
+                # One pipelined round trip for all 52 HGETALLs.
+                pipe = self.aioredis.pipeline()
+                for k in recent_keys:
+                    pipe.hgetall(k)
+                rows = await pipe.execute()
+
+                # Re-key by report date and reverse back to oldest-first, which
+                # is the order _positioning_metrics' rolling windows expect.
+                # `if row` drops any key that raced with a TTL expiry.
+                return asset, {
+                    k.split(":")[-1]: row
+                    for k, row in reversed(list(zip(recent_keys, rows)))
+                    if row
+                }
+
+            # Fan out: one get_last_52 coroutine per (market, asset), all
+            # awaited together.
+            tasks = [
+                get_last_52(market, asset)
+                for market, assets in asset_list.items()
+                for asset in assets
+            ]
+            results = await asyncio.gather(*tasks)
+
+            # Keep only instruments that returned data, score them, cache the
+            # snapshot, and hand the same dict back to the caller.
+            data = {asset: rows for asset, rows in results if rows}
+            metrics = self._positioning_metrics(data)
+            await self.store_positioning(metrics)
+            return metrics
+
+        except Exception as e:
+            logging.error(f"Error calculating instituitional Positioning:{e}", exc_info=True)
+            raise
+
+    async def store_positioning(self, metrics: dict, ttl: int = COT_POS_TTL) -> None:
+        """Cache the _positioning_metrics() output in Redis: one JSON object per
+        instrument at f"{COT_POS_KEY_PREFIX}:{asset}" ({category: {net_pct_oi,
+        percentile, score, z, mom_4w, label}}), plus a "_meta" object listing
+        the instruments and the update timestamp. All writes go through one
+        pipeline so the whole snapshot lands in a single round trip.
+        """
+        try:
+            # Never overwrite a good snapshot with an empty one (e.g. a run
+            # where every instrument was short on history).
+            if not metrics:
+                logging.info("No positioning metrics to store")
+                return
+
+            # _meta lets get_positioning() enumerate the per-instrument keys
+            # with a single GET instead of a SCAN, and carries the freshness
+            # timestamp the frontend shows.
+            meta = {
+                "instruments": list(metrics.keys()),
+                "updated": datetime.now().isoformat(),
+            }
+
+            # One pipeline: N per-instrument JSON blobs + the _meta blob, all
+            # with the same TTL, in a single round trip. Instrument names carry
+            # spaces / "&" - fine inside a Redis key.
+            pipe = self.aioredis.pipeline()
+            for asset, cats in metrics.items():
+                pipe.set(f"{COT_POS_KEY_PREFIX}:{asset}", json.dumps(cats), ex=ttl)
+            pipe.set(f"{COT_POS_KEY_PREFIX}:_meta", json.dumps(meta), ex=ttl)
+            await pipe.execute()
+        except Exception as e:
+            logging.error(f"Error storing positioning metrics to redis: {e}", exc_info=True)
+            raise
+
+    async def get_positioning(self) -> dict:
+        """Read the cached positioning snapshot back out of Redis - the inverse
+        of store_positioning(). Returns {"meta": {...}, "instruments": {asset:
+        {category: {metrics}}}}. An empty "instruments" dict means the cache has
+        expired or instituitional_pos() has never run.
+        """
+        try:
+            # decode_responses=True on the pool -> str, or None if the key is
+            # gone. Missing _meta is normal (never populated / expired).
+            meta_raw = await self.aioredis.get(f"{COT_POS_KEY_PREFIX}:_meta")
+            meta = json.loads(meta_raw) if meta_raw else {}
+
+            # Normal path: take the instrument list straight from _meta.
+            # Fallback: _meta expired but some per-instrument keys survive -
+            # SCAN for them and strip the prefix, skipping _meta itself.
+            assets = meta.get("instruments")
+            if not assets:
+                prefix = f"{COT_POS_KEY_PREFIX}:"
+                assets = [
+                    k[len(prefix):]
+                    async for k in self.aioredis.scan_iter(match=f"{prefix}*", count=100)
+                    if not k.endswith(":_meta")
+                ]
+
+            # Nothing cached at all - return the shape callers expect, empty.
+            if not assets:
+                return {"meta": meta, "instruments": {}}
+
+            # One pipelined batch of GETs for every instrument blob.
+            pipe = self.aioredis.pipeline()
+            for asset in assets:
+                pipe.get(f"{COT_POS_KEY_PREFIX}:{asset}")
+            rows = await pipe.execute()
+
+            # Skip any instrument whose key expired between the _meta read and
+            # this batch (row is None).
+            instruments = {
+                asset: json.loads(row)
+                for asset, row in zip(assets, rows)
+                if row is not None
+            }
+            return {"meta": meta, "instruments": instruments}
+        except Exception as e:
+            logging.error(f"Error getting positioning metrics from redis: {e}", exc_info=True)
+            raise
+        
+        
+# if __name__ == "__main__":
+#     test = COTController()
+#     print(asyncio.run(test.instituitional_pos()))

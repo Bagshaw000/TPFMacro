@@ -19,6 +19,7 @@ from faststream.nats.fastapi import NatsRouter
 from src.controller.cot import COTController
 from src.controller.macro import MacroController
 from src.controller.lse_ import LSEController
+from src.controller.cross_section import CrossSectionController
 
 import logging
 
@@ -26,6 +27,7 @@ market_overview = MarketOverview()
 cot_ctrl =  COTController()
 macro_ctrl = MacroController()
 lse_ctrl = LSEController()
+cross_sec = CrossSectionController()
 env_var = get_doppler_env()
 nats_router = NatsRouter("nats://localhost:4222/")
 
@@ -39,7 +41,13 @@ async def lifespan(app: FastAPI):
     
    
     load_dotenv()
-    asyncio.gather(market_overview.get_currency(), nats_router.startup(), cot_ctrl.setup_redis(), macro_ctrl.refresh_factor_stats(), lse_ctrl.get_event_cal()) 
+    asyncio.gather(market_overview.get_currency(), 
+                   nats_router.startup(), 
+                   cot_ctrl.setup_redis(),
+                   macro_ctrl.refresh_factor_stats(), 
+                   lse_ctrl.get_event_cal(), 
+                   cot_ctrl.instituitional_pos(),
+                   cross_sec.update_quandrant()) 
     
     yield
     
