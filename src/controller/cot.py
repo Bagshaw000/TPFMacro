@@ -813,13 +813,27 @@ class COTController:
             
             
 
+            # One LLM summary per instrument, all launched together. The
+            # LLMController caps its own concurrency and retries 429s, so the
+            # fan-out is safe. return_exceptions=True: a failed summary is
+            # logged and that instrument is stored without one, rather than
+            # sinking the whole batch.
+            assets = list(metrics.keys())
+            summaries = await asyncio.gather(
+                *(self.llm.breakdown_inst_positioning(metrics[a]) for a in assets),
+                return_exceptions=True,
+            )
+
             # One pipeline: N per-instrument JSON blobs + the _meta blob, all
             # with the same TTL, in a single round trip. Instrument names carry
             # spaces / "&" - fine inside a Redis key.
             pipe = self.aioredis.pipeline()
-            for asset, cats in metrics.items():
-                llm_sum = await self.llm.breakdown_inst_positioning(cats)
-                cats["summary"] = llm_sum
+            for asset, summary in zip(assets, summaries):
+                cats = metrics[asset]
+                if isinstance(summary, Exception):
+                    logging.error(f"breakdown_inst_positioning failed for {asset}: {summary}")
+                else:
+                    cats["summary"] = summary
                 pipe.set(f"{COT_POS_KEY_PREFIX}:{asset}", json.dumps(cats), ex=ttl)
             pipe.set(f"{COT_POS_KEY_PREFIX}:_meta", json.dumps(meta), ex=ttl)
             await pipe.execute()

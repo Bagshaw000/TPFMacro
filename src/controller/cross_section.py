@@ -584,7 +584,20 @@ class CrossSectionController:
             composite = await self.calculate_composite(normalized_data[1])  # z-score frame -> price / demand / composite
             quandrant = await self.assign_quadrants(composite)              # + quadrant / median columns
             await self.store_quadrants(quandrant)                           # write per-country blobs to Redis
-            await self.store_cross_section_breakdown()                      # then have the LLM narrate the fresh snapshot
+
+            # Both narration steps only READ the snapshot store_quadrants just
+            # wrote and write to disjoint keys (BREAKDOWN_KEY vs
+            # BREAKDOWN_KEY:{code}), so run them together. return_exceptions:
+            # a failed LLM narration is logged but must not undo a successful
+            # quadrant store or abort the sibling narration.
+            narration = await asyncio.gather(
+                self.store_cross_section_breakdown(),      # global LLM narrative
+                self.store_cross_section_by_country(),     # per-country LLM narratives
+                return_exceptions=True,
+            )
+            for result in narration:
+                if isinstance(result, Exception):
+                    logging.error(f"Cross-section narration step failed: {result}", exc_info=result)
         except Exception as e:
             logging.error(f"Error updating the quandrant:{e}", exc_info=True)
             raise
@@ -639,6 +652,134 @@ class CrossSectionController:
         except Exception as e:
             logging.error(f"Error getting cross section: {e}", exc_info=True)
             raise
+        
+    async def get_cross_section_by_country(self, country: str) -> dict | None:
+        """Read one country's cached quadrant row plus its LLM narrative from
+        Redis in a single pipelined round trip:
+          - f"{QUADRANT_KEY_PREFIX}:{code}" -> {price, demand, composite,
+            contrib_*, quadrant, price_median, demand_median} (store_quadrants).
+            price_median / demand_median are stored per row, so this result is
+            self-contained (no _meta read needed).
+          - f"{BREAKDOWN_KEY}:{code}" -> {summary, updated, source_updated}
+            (store_cross_section_by_country), folded in under "summary".
+
+        Returns the quadrant row with "summary" added (None if that country's
+        narrative isn't cached), or None if the country isn't in the current
+        snapshot at all.
+        """
+        try:
+            code = country.upper()
+
+            # Both GETs in one round trip.
+            pipe = self.redis.pipeline()
+            pipe.get(f"{QUADRANT_KEY_PREFIX}:{code}")
+            pipe.get(f"{BREAKDOWN_KEY}:{code}")
+            data, summary_raw = await pipe.execute()
+
+            if not data:
+                return None
+
+            # decode_responses=True -> str, so json.loads (parse a string),
+            # not json.load (which expects a file-like object).
+            row = json.loads(data)
+            row["summary"] = json.loads(summary_raw) if summary_raw else None
+            return row
+        except Exception as e:
+            logging.error(f"Error getting cross section for {country}: {e}", exc_info=True)
+            raise
+    
+    async def store_cross_section_by_country(self, ttl: int = BREAKDOWN_TTL) -> dict:
+        """For every country in the current snapshot, have the LLM explain that
+        country's slot in the Phillips-curve cross-section
+        (LLMController.breakdown_by_country) and cache each explanation in Redis
+        at f"{BREAKDOWN_KEY}:{code}" as {"summary", "updated", "source_updated"}.
+
+        Returns {code: summary_text} for the countries that produced one.
+
+        The per-country breakdown_by_country coroutines are launched together
+        with asyncio.gather (return_exceptions=True, so one country failing is
+        logged and skipped rather than sinking the batch).
+
+        Caveat: breakdown_by_country still calls requests.post synchronously,
+        which blocks the event loop for each HTTP request - so the POSTs
+        themselves are not truly concurrent, only whatever the coroutine
+        awaits around them. For genuine overlap switch that call to an async
+        HTTP client (httpx.AsyncClient).
+        """
+        try:
+            # Country list comes from the snapshot's _meta blob (written by
+            # store_quadrants). Missing/expired _meta -> nothing to do.
+            meta_raw = await self.redis.get(f"{QUADRANT_KEY_PREFIX}:_meta")
+            meta = json.loads(meta_raw) if meta_raw else {}
+            codes = meta.get("countries") or []
+            if not codes:
+                logging.info("No cross-section snapshot to break down by country")
+                return {}
+
+            # Pull every country's quadrant row in one pipelined round trip
+            # rather than a GET per country.
+            read_pipe = self.redis.pipeline()
+            for code in codes:
+                read_pipe.get(f"{QUADRANT_KEY_PREFIX}:{code}")
+            rows = await read_pipe.execute()
+
+            # Only the countries whose row is still live, each paired with its
+            # parsed data.
+            present = [(code, json.loads(raw)) for code, raw in zip(codes, rows) if raw]
+            if not present:
+                return {}
+
+            # Launch one breakdown_by_country coroutine per country and wait
+            # for all of them. return_exceptions=True so one country's failure
+            # doesn't sink the rest - it's logged and skipped below.
+            texts = await asyncio.gather(
+                *(self.llm.breakdown_by_country(row, code) for code, row in present),
+                return_exceptions=True,
+            )
+
+            # Stamp every explanation from this run with the same timestamps:
+            # `updated` = now, `source_updated` = the snapshot they describe.
+            now = pd.Timestamp.now(tz="UTC").isoformat()
+            source_updated = meta.get("updated")
+
+            summaries: dict = {}
+            write_pipe = self.redis.pipeline()
+            for (code, _row), text in zip(present, texts):
+                if isinstance(text, Exception):
+                    logging.error(f"breakdown_by_country failed for {code}: {text}")
+                    continue
+                if not text:
+                    continue
+                summaries[code] = text
+                write_pipe.set(
+                    f"{BREAKDOWN_KEY}:{code}",
+                    json.dumps({
+                        "summary": text,
+                        "updated": now,
+                        "source_updated": source_updated,
+                    }),
+                    ex=ttl,
+                )
+
+            # One round trip for all the writes (no-op if nothing was produced).
+            if summaries:
+                await write_pipe.execute()
+            return summaries
+        except Exception as e:
+            logging.error(f"Error storing country cross section: {e}", exc_info=True)
+            raise
+
+    async def get_cross_section_breakdown_by_country(self, country: str) -> dict:
+        """Read one country's cached LLM explanation - the per-country inverse
+        of store_cross_section_by_country(). Returns the stored
+        {"summary", "updated", "source_updated"} dict, or {} if none is cached.
+        """
+        try:
+            raw = await self.redis.get(f"{BREAKDOWN_KEY}:{country.upper()}")
+            return json.loads(raw) if raw else {}
+        except Exception as e:
+            logging.error(f"Error getting country breakdown for {country}: {e}", exc_info=True)
+            raise
     
     async def store_cross_section_breakdown(self, ttl: int = BREAKDOWN_TTL) -> str | None:
         """Read the cached quadrant snapshot, have the LLM write a narrative of
@@ -685,7 +826,8 @@ class CrossSectionController:
         except Exception as e:
             logging.error(f"Error getting cross section breakdown: {e}", exc_info=True)
             raise
-
+    
+    
 
 # Manual smoke-test harness, guarded so importing this module has no side
 # effects. Needs a reachable Postgres + Redis (set REDIS_HOST for a local run)
@@ -696,7 +838,7 @@ class CrossSectionController:
 # pipeline stage by stage using the commented lines below.
 # if __name__ == "__main__":
 #     test = CrossSectionController()
-#     print(asyncio.run(test.store_cross_section_breakdown()))
+#     print(asyncio.run(test.store_cross_section_by_country()))
 #     # val = asyncio.run(test.load_data())
 #     # val2 = asyncio.run(test.derived_economic_standard(val[0]))
 #     # val3 = asyncio.run(test.normalized_factors(val2))

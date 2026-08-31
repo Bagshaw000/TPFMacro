@@ -50,6 +50,16 @@ async def cross_section_panel():
 
     return JSONResponse(status_code=500, content=None)
 
+@router.get("/cross_section/{country}")
+async def cross_section_panel(country:str):
+    data = await cross_section_ctrl.get_cross_section_by_country(country)
+    # print(data)
+
+    if data:
+        return JSONResponse(status_code=200, content=data)
+
+    return JSONResponse(status_code=500, content=None)
+
 
 
 # @router.get("/cross_section/analysis")
