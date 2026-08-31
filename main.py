@@ -53,6 +53,8 @@ async def lifespan(app: FastAPI):
         return_exceptions=True
     )
     
+    await asyncio.gather(macro_ctrl.get_global_cycle())
+    
     # 4. Log failures but continue
     for result in results:
         if isinstance(result, Exception):
