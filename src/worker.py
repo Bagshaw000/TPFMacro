@@ -21,24 +21,24 @@ import logging
 import os
 import sys
 
-from controller.lse_ import LSEController
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# worker.py sits directly in src/, so src/ itself is what needs to be on the
+# path for the bare `model.*` / `controller.*` / `custom_types.*` imports used
+# throughout this codebase (one dirname, not two).
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 from httpx import AsyncClient
 from arq import create_pool
 from arq.connections import RedisSettings
 from arq import cron
-from .cot import COT
+from cot import COT
 from model.market_overview import MarketOverview
 from controller.macro import MacroController
 from controller.cross_section import CrossSectionController
-# from controller.cpi import CPIController
-# from controller.ppi import PPIController
 from controller.economic_event import EconomicEventController
 # from controller.gdp import GDPController
 # from controller.unemp import UNEMPController
 from controller.news import NewsSentimentController
 # from controller.cross_section import CrossSectionController
-
+from controller.lse_ import LSEController
 
 try:
     # Check if a loop already exists

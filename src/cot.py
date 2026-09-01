@@ -1,6 +1,8 @@
 import os
 import sys
-sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+# cot.py sits directly in src/, so src/ is what goes on the path for the bare
+# `model.*` / `controller.*` / `custom_types.*` imports below (one dirname).
+sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 import asyncio
 import numpy as np
 import json

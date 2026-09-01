@@ -33,6 +33,22 @@ from typing import List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from config.config import get_doppler_env
 from custom_types.cpi import ECON_INDICATOR_TYPES, _EconIndicatorWithForecast, CPIType, INFType, LSEResponseType, PPIType, RETAILType, UNEMPType, countries, country_mapping, get_country_code, get_key, months
+
+
+def _period_from_hint(period_hint: str, release_date: datetime) -> str:
+    """Reference month a reading describes, as "YYYY-MM".
+
+    `period_hint` is a bare month token ("DEC"); the year is inferred from
+    `release_date` (the publication date). A release is always published in or
+    after its reference month, so if the hint month is *after* the release
+    month it must belong to the previous year (e.g. published 2026-01-05 with
+    hint "DEC" -> 2025-12).
+    """
+    hint_month = months.index(period_hint.upper()) + 1   # 1..12
+    year = release_date.year
+    if hint_month > release_date.month:
+        year -= 1
+    return f"{year:04d}-{hint_month:02d}"
 from database.redis_ import RedisConnection
 from model.lse import LSEModel
 from lse import LSE
@@ -357,11 +373,16 @@ class LSEController:
                             # is NOT NULL in the DB, so there's nothing to insert.
                             continue
                         lse_forecast = _parse_percentage(element_data.forecast, element_data.previous)
+                        release_date = datetime.strptime(element_data.date, "%Y-%m-%d")
                         data = model_type(country_code=country_code_,
                                            freq="M",
-                                           report_date=datetime.strptime(element_data.date,"%Y-%m-%d"),
+                                           report_date=release_date,
+                                           # Reference month, e.g. "2025-12" - the
+                                           # upsert key. period_hint is guaranteed
+                                           # to be in `months` by the filter above.
+                                           period=_period_from_hint(period_hint, release_date),
                                            index_value=forecast, lse_forecast=lse_forecast)
-                       
+
                         data_list.append(data)
           
             return data_list
@@ -432,15 +453,16 @@ class LSEController:
             raw_values = await self.redis.mget(country_keys) if country_keys else []
             records = [json.loads(v) for v in raw_values if v is not None]
 
-            # "Up to date" = the country's latest stored report falls in the
-            # same year-month as the most recent report across all countries.
-            # ISO date strings ("YYYY-MM-DDTHH:MM:SS") slice/compare
-            # correctly as plain strings for a "YYYY-MM" period.
+            # "Up to date" = the country's latest stored reading is for the
+            # same reference month as the most recent one across all countries.
+            # Prefer the `period` column (the true reference month); fall back
+            # to slicing the ISO report_date ("YYYY-MM-DDTHH:MM:SS"[:7]) for any
+            # record cached before the period column existed.
             periods = [
-                (record, record["report_date"][:7])
+                (record, record.get("period") or (record["report_date"][:7] if record.get("report_date") else None))
                 for record in records
-                if record.get("report_date")
             ]
+            periods = [(record, period) for record, period in periods if period]
             if periods:
                 latest_period = max(period for _, period in periods)
                 up_to_date_records = [record for record, period in periods if period == latest_period]

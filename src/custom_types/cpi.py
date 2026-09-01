@@ -90,7 +90,16 @@ class _EconIndicatorBase(SQLModel):
     id: int | None = Field(primary_key=True, default=None)
     country_code: str
     freq: str | None = Field(default=None)
+    # Actual publication/release date of the reading.
     report_date: datetime
+    # Reference month the reading describes, as "YYYY-MM" (derived in
+    # controller/lse_.py's process_event from period_hint + the release year).
+    # This - not report_date - is a reading's real identity: a flash estimate,
+    # the final print and any later revision for the same month all share a
+    # period and collapse to one row (see the UniqueConstraint below).
+    # Optional at the model level only so a stale `{table}_recent` view can't
+    # break model_validate; the DB column is NOT NULL.
+    period: str | None = Field(default=None)
 
 
 class _EconIndicatorNoForecast(_EconIndicatorBase):
@@ -128,13 +137,16 @@ def make_econ_indicator_type(
     table name (and unique-constraint name) supplied as parameters instead
     of being hardcoded per class."""
     class_name = class_name or f"{tablename.upper()}Type"
-    constraint_name = constraint_name or f"{tablename}_unique"
+    # One reading per (country, reference month). Keyed on `period`, not
+    # `report_date`, so re-releases of the same month (flash -> final ->
+    # revision) upsert onto one row instead of piling up.
+    constraint_name = constraint_name or f"{tablename}_country_period_unique"
     base = _EconIndicatorWithForecast if with_forecast else _EconIndicatorNoForecast
 
     namespace = {
         "__tablename__": tablename,
         "__table_args__": (
-            UniqueConstraint("report_date", "country_code", name=constraint_name),
+            UniqueConstraint("country_code", "period", name=constraint_name),
         ),
         "__module__": __name__,
     }

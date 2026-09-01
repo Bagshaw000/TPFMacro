@@ -52,7 +52,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from database.redis_ import RedisConnection
 from custom_types.cpi import countries, country_mapping, get_country_code
 from model.lse import LSEModel
-from .lse_ import events_
+from controller.lse_ import events_
 import logging
 
 
@@ -780,7 +780,50 @@ class MacroController:
         except Exception as e:
             logging.error(f"Error getting countries macro data")
             raise
+        
+    async def get_country_stats_timeseries(self, country: str, months: int = 14) -> dict:
+        """Last `months` monthly readings of every tracked macro indicator for
+        one country: {macro: [[report_date_iso, value], ...]}. An indicator
+        with no data for this country maps to [].
 
-# if __name__ == "__main__":
-#     test = MacroController()
-#     print(asyncio.run(test.get_global_cycle()))
+        report_date comes back from Postgres as a datetime.date, which
+        starlette's JSONResponse can't serialise - so dates are stringified
+        (ISO) here before returning.
+
+        Multiple releases can land in the same calendar month (a flash estimate
+        then the final, or a revision). Those are collapsed to the single most
+        recent reading for that month, so the series has at most one point per
+        month. Because get_monthly_series trims to `months` raw rows *before*
+        this dedupe, a month with a duplicate leaves the returned series one
+        point shorter than `months`.
+        """
+
+        def _one_per_month(points: list[tuple]) -> list[tuple]:
+            # points arrive oldest -> newest; keying a dict by "YYYY-MM" and
+            # letting later rows overwrite keeps the last reading per month,
+            # and (since months only advance) preserves chronological order.
+            by_month: dict[str, tuple] = {}
+            for d, value in points:
+                month = d.strftime("%Y-%m") if hasattr(d, "strftime") else str(d)[:7]
+                by_month[month] = (d, value)
+            return list(by_month.values())
+
+        try:
+            code = country.upper()
+            # events_ calls are independent -> issue them together.
+            series = await asyncio.gather(
+                *(self.model.get_monthly_series(macro, months) for macro in events_)
+            )
+            return {
+                macro: [
+                    [d.isoformat() if hasattr(d, "isoformat") else d, value]
+                    for d, value in _one_per_month(by_country.get(code, []))
+                ]
+                for macro, by_country in zip(events_, series)
+            }
+        except Exception as e:
+            logging.error(f"Error getting all the country timeseries {e}", exc_info=True)
+            raise
+if __name__ == "__main__":
+    test = MacroController()
+    print(asyncio.run(test.get_country_stats_timeseries("USA")))

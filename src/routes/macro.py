@@ -60,8 +60,14 @@ async def cross_section_panel_by_country(country:str):
 
     return JSONResponse(status_code=500, content=None)
 
+@router.get("/economy/timeseries/{country}")
+async def macro_time_series_by_country(country:str):
+    data = await macro_ctrl.get_country_stats_timeseries(country)
 
+    if data:
+        return JSONResponse(status_code=200, content=data)
 
+    return JSONResponse(status_code=500, content=None)
 # @router.get("/cross_section/analysis")
 # async def cross_section_analysis(mode: str = "percentile"):
 #     data = await cross_section_ctrl.get_snapshot(mode=mode)

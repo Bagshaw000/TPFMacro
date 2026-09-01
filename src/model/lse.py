@@ -11,8 +11,11 @@ from database.db import session_scope
 from custom_types.cpi import ECON_INDICATOR_TYPES, LSEType, PPIType, _EconIndicatorWithForecast, countries
 
 # Columns that identify a row for upsert purposes (matches each table's
-# UniqueConstraint('report_date', 'country_code', ...)) - never overwritten.
-_CONFLICT_COLUMNS = ("report_date", "country_code")
+# UniqueConstraint('country_code', 'period')) - never overwritten. `period` is
+# the reference month, so a flash / final / revision for the same month all
+# target the same row; `report_date` is now a regular column and DOES get
+# updated on conflict, so the latest publication wins.
+_CONFLICT_COLUMNS = ("country_code", "period")
 
 
 class LSEModel:
@@ -150,14 +153,17 @@ class LSEModel:
             table = model_class.__table__
 
             # Postgres refuses to UPDATE the same conflict target twice within
-            # one INSERT command, so the batch itself must be free of
-            # duplicate (report_date, country_code) pairs - e.g. a country
-            # appearing more than once in `recent_event` can produce
-            # overlapping fetch windows that land the same release twice.
+            # one INSERT command, so the batch itself must be free of duplicate
+            # (country_code, period) pairs - a country whose flash and final
+            # for one month both land in the same fetch, or overlapping
+            # catch-up windows, will produce them. Keep the row with the newest
+            # report_date so the batch's winner matches the DB's.
             deduped: dict[tuple, _EconIndicatorWithForecast] = {}
             for record in data:
-                key = (record.report_date, record.country_code)
-                deduped[key] = record
+                key = (record.country_code, record.period)
+                existing = deduped.get(key)
+                if existing is None or record.report_date > existing.report_date:
+                    deduped[key] = record
             values = [record.model_dump(exclude={"id"}) for record in deduped.values()]
 
             stmt = pg_insert(table).values(values)
@@ -169,6 +175,10 @@ class LSEModel:
             stmt = stmt.on_conflict_do_update(
                 index_elements=list(_CONFLICT_COLUMNS),
                 set_=update_cols,
+                # Only overwrite when the incoming row is at least as recent as
+                # the stored one, so a late-arriving older publication (e.g. a
+                # re-fetched flash) can't clobber a newer revision.
+                where=(table.c.report_date <= stmt.excluded.report_date),
             )
 
             async with session_scope() as session:
