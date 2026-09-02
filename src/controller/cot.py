@@ -26,15 +26,37 @@ from controller.llm import LLMController
 import pandas as pd
 import numpy as np
 
-# Redis key prefix for the cached institutional-positioning snapshot
-# (instituitional_pos output). One JSON blob per instrument at
-# f"{COT_POS_KEY_PREFIX}:{asset}", plus a f"{COT_POS_KEY_PREFIX}:_meta" blob
-# with the instrument list and an update timestamp.
+# Redis key prefix for the cached positioning snapshot. One JSON blob per
+# instrument at f"{COT_POS_KEY_PREFIX}:{asset}".
 COT_POS_KEY_PREFIX = "cot_pos"
 
-# TTL on that snapshot. COT is released weekly, so this is a staleness guard
+# The curated index (instituitional_pos / store_positioning): only the
+# COT_CURATED_ASSETS instruments, each with an LLM `summary`, plus an update
+# timestamp. This key is the frontend's "tracked instruments" list.
+COT_POS_META_KEY = f"{COT_POS_KEY_PREFIX}:_meta"
+
+# The full index (full_positioning / store_full_positioning): curated + the
+# long tail of every other cot_ttf instrument. store_full_positioning READS
+# COT_POS_META_KEY for the curated names but never writes it.
+COT_POS_META_ALL_KEY = f"{COT_POS_KEY_PREFIX}:_meta_all"
+
+# TTL on the snapshot. COT is released weekly, so this is a staleness guard
 # for a stalled refresh - roughly a month, several release cycles of margin.
 COT_POS_TTL = 30 * 24 * 3600
+
+# Macro-relevant instruments, grouped by the `market` label used in the Redis
+# key (cot_ttf:{market}:{asset}:{date}). instituitional_pos() scores exactly
+# these; full_positioning() scores every cot_ttf instrument that is NOT here.
+COT_CURATED_ASSETS: dict[str, list[str]] = {
+    "Currency": ["AUSTRALIAN DOLLAR", "EURO FX", "USD INDEX", "BRITISH POUND", "JAPANESE YEN"],
+    "Crypto": ["BITCOIN"],
+    "Indices": ["S&P 500 STOCK INDEX", "S&P 500 VIX", "DOW JONES INDUSTRIAL AVERAGE"],
+    "Financial": ["FED FUNDS", "UST 10Y NOTE"],
+}
+
+# Instruments per fetch batch in full_positioning - bounds concurrent SCANs and
+# pipelines when scoring the whole cot_ttf universe (hundreds of contracts).
+COT_POS_FULL_BATCH = 40
 
 
 class COTController:
@@ -274,74 +296,25 @@ class COTController:
 
     # Convert redis to dataframe
     async def new_covert_redis_dataframe(self, asset_list:list, asset_cls:str):
-        """For every asset in `asset_list`, scan Redis for that asset's
-        weekly "cot_ttf:{asset_cls}:{asset}:*" hashes, keep only the most
-        recent 53 (~1 year of weekly COT reports), and batch-read them into
-        `{date: hash_data}` dicts. Returns `{asset: {date: hash_data}}` for
-        every asset that had at least one stored entry.
+        """For every asset in `asset_list`, read its most recent 53 weekly
+        "cot_ttf:{asset_cls}:{asset}:*" hashes (~1 year of COT reports - matches
+        the longest window new_calculate_all_change needs) into {date: hash}
+        dicts. Returns {asset: {date: hash}} for every asset that had at least
+        one stored entry.
+
+        `asset_cls` is the {market} segment of the key, so _fetch_recent_weeks
+        does the whole scan/sort/pipeline job. That helper uses the async Redis
+        client, so this is genuinely non-blocking (unlike the rest of this path).
         """
         try:
-            # Get all patterns
-            patterns = [f"cot_ttf:{asset_cls}:{asset}:*" for asset in asset_list]
-
-            async def get_asset_data(asset,pattern):
-                # Collect All keys for the asset
-                # NOTE: uses the sync client's scan_iter/pipeline (not
-                # self.aioredis) despite being declared async - see module
-                # docstring.
-
-                all_keys = list()
-                cursor = 0
-                for key in self.redis.scan_iter(match=pattern,count=1000):
-                    all_keys.append(key)
-
-
-                if not all_keys:
-                    return None
-
-                # Sort all keys in revers order to get the most recent entries
-                all_keys.sort(reverse=True)
-
-                # Get the most recent 53 entries (COT reports are weekly,
-                # so 53 entries covers roughly the trailing year - matches
-                # the longest period (1_year: 52 weeks) new_calculate_all_change needs)
-                recent_keys = all_keys[:53]
-
-                pipeline= self.redis.pipeline()
-
-                # Batch process all the data from with recent keys
-                for key in recent_keys:
-                    pipeline.hgetall(key)
-
-                results = pipeline.execute()
-
-
-                temp_dict = dict()
-                for key, hash_data in zip(recent_keys, results):
-
-                    # Check if the data for the corresponding key
-                    if hash_data:
-                        date_key = key.split(":")
-                        temp_dict[date_key[-1]] = hash_data
-
-                # Return the asset and asset data if any exist else return None
-                return asset,temp_dict if temp_dict else None
-
-            # Get assest data parrellelly by batch processing data
-            tasks = [get_asset_data(asset,pattern) for asset,pattern in zip(asset_list, patterns)]
-            results = await asyncio.gather(*tasks)
-
-
-            # Map all assets to its corresponding data
-            df = dict()
-            for result in results:
-                if result is not None:
-                    asset, data = result
-                    df[asset] = data
-            return df
+            results = await asyncio.gather(
+                *(self._fetch_recent_weeks(asset_cls, asset, 53) for asset in asset_list)
+            )
+            return {asset: rows for asset, rows in results if rows}
 
         except Exception as e:
             logging.error(f"Converting redis to dataframe", exc_info=True)
+            raise
 
 
     # This insert the cot_ttf into the redis
@@ -459,25 +432,6 @@ class COTController:
             logging.error(f"Error calculating asset position")
             raise
 
-    # Incomplete: `all_keys` is declared but scan_iter's results are never
-    # appended to it (unlike the equivalent loop in
-    # new_covert_redis_dataframe.get_asset_data), so `keys` is unused and
-    # `print(all_keys)` always prints an empty list. Nothing is returned.
-    async def get_asset_year(self, asset:str, asset_cls:str ):
-        try:
-                    # check if asset data exist in redis
-            pipeline = self.aioredis.pipeline()
-            key = f"cot_ttf:{asset_cls}:{asset}:*"
-            all_keys = list()
-            cursor = 0
-            keys = self.redis.scan_iter(match=key,count=1000)
-
-            
-
-
-        except Exception as e:
-            logging.error(f"Error calculating asset position")
-            raise
 
     # This setup redis to ensure data is coherent for database and redis
     async def setup_redis(self):
@@ -717,70 +671,175 @@ class COTController:
             logging.error(f"Error computing positioning metrics: {e}", exc_info=True)
             raise
 
-    async def instituitional_pos(self):
-        """Institutional (asset-manager) positioning per instrument, plus
-        leveraged-money and dealer positioning for context.
+    async def _fetch_last_52(self, market: str, asset: str) -> tuple[str, dict]:
+        """One instrument's most recent 52 weekly COT hashes from Redis, as
+        (asset, {report_date: hash}) oldest-first - the order
+        _positioning_metrics' rolling windows expect. Empty dict if the
+        instrument isn't cached.
+        """
+        return await self._fetch_recent_weeks(market, asset, 52)
 
-        Pulls the last 52 weekly COT reports for a curated instrument list from
-        Redis, then runs `_positioning_metrics` to turn each trader category's
-        net position into a crowding percentile / z-score / momentum on the most
-        recent week. Returns {asset: {category: {metric: value}}}.
+    async def _fetch_recent_weeks(self, market: str, asset: str,
+                                  weeks: int) -> tuple[str, dict]:
+        """One instrument's most recent `weeks` weekly COT hashes from Redis,
+        as (asset, {report_date: hash}) oldest-first. Empty dict if the
+        instrument isn't cached.
+        """
+        pattern = f"cot_ttf:{market}:{asset}:*"
+
+        # SCAN (non-blocking) rather than KEYS. count=100 is a work-per-call
+        # hint, not a result limit.
+        keys = [k async for k in self.aioredis.scan_iter(match=pattern, count=100)]
+        if not keys:
+            return asset, {}
+
+        # Keys end in an ISO date, which sorts chronologically as text, so a
+        # reverse sort puts the newest first; take the last `weeks` reports.
+        recent_keys = sorted(keys, reverse=True)[:weeks]
+
+        # One pipelined round trip for all the HGETALLs.
+        pipe = self.aioredis.pipeline()
+        for k in recent_keys:
+            pipe.hgetall(k)
+        rows = await pipe.execute()
+
+        # Re-key by report date, reverse back to oldest-first. `if row` drops a
+        # key that raced with a TTL expiry.
+        return asset, {
+            k.split(":")[-1]: row
+            for k, row in reversed(list(zip(recent_keys, rows)))
+            if row
+        }
+
+    def _net_pct_oi_history(self, by_date: dict) -> dict:
+        """Turn one instrument's {report_date: redis_hash} (any order) into a
+        per-category weekly history of net % of open interest:
+
+            {"asset_mgr": [["2025-01-07", 12.3], ["2025-01-14", 11.8], ...],
+             "lev_money": [...], "dealer": [...]}
+
+        net_pct_oi = (long - short) / open_interest_all * 100, using the same
+        _POS_LEGS categories and OI-normalisation as _positioning_metrics.
+        Weeks are oldest-first; a week with missing / non-positive OI or an
+        unparseable leg comes through as None so the series stays aligned.
+        A category whose long/short columns are entirely absent is skipped.
+        """
+        # One row per weekly report, the hash fields spread out as columns.
+        df = pd.DataFrame([{"date": d, **h} for d, h in by_date.items()])
+        if df.empty:
+            return {}
+
+        # Redis hashes are all strings; coerce the date and sort ascending so
+        # the emitted series is oldest-first regardless of dict order.
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"]).sort_values("date")
+
+        # net-%-of-OI needs a positive denominator - .where(> 0) nulls out any
+        # week with missing / zero / negative OI so it comes through as NaN.
+        oi = pd.to_numeric(df.get("open_interest_all"), errors="coerce")
+        oi = oi.where(oi > 0)
+
+        out: dict = {}
+        for cat, (long_f, short_f) in self._POS_LEGS.items():
+            # An instrument whose hash never carried this category's legs -
+            # skip it rather than emit an all-None series.
+            if long_f not in df.columns or short_f not in df.columns:
+                continue
+            # (long - short) / OI, per row, as a percent. Same definition as
+            # _positioning_metrics; this just keeps every week instead of the last.
+            net = (pd.to_numeric(df[long_f], errors="coerce")
+                   - pd.to_numeric(df[short_f], errors="coerce")) / oi * 100
+            # [date, value] pairs; NaN (bad OI / unparseable leg) -> None so the
+            # JSON stays clean and the series stays date-aligned.
+            out[cat] = [
+                [d.strftime("%Y-%m-%d"), None if pd.isna(v) else round(float(v), 2)]
+                for d, v in zip(df["date"], net)
+            ]
+        return out
+
+    async def net_pct_oi_timeseries(self, scope: str = "tracked",
+                                    weeks: int = 52) -> dict:
+        """Net % of open interest as a weekly time series, per trader category,
+        for every instrument listed in the positioning meta index.
+
+            scope="tracked" -> cot_pos:_meta      (curated shortlist)
+            scope="all"     -> cot_pos:_meta_all  (curated + long tail)
+
+        Returns {asset: {category: [[report_date, net_pct_oi], ...]}}, each
+        series oldest-first. Reads straight from the cot_ttf:{market}:{asset}:*
+        weekly hashes (not the cached positioning snapshot), so it reflects
+        whatever history Redis currently holds - typically ~1 year.
+
+        Instruments named in the index but with no cot_ttf hashes cached (or
+        not present in Postgres, so their `market` label is unknown) are
+        omitted.
         """
         try:
-            # Curated instrument shortlist, grouped by the `market` label used
-            # in the Redis key (cot_ttf:{market}:{asset}:{date}). Only these
-            # are scored - the full cot_ttf set has hundreds of contracts, most
-            # irrelevant to a macro positioning view.
-            asset_list = {
-                "Currency": ["AUSTRALIAN DOLLAR", "EURO FX", "USD INDEX", "BRITISH POUND", "JAPANESE YEN"],
-                "Crypto": ["BITCOIN"],
-                "Indices": ["S&P 500 STOCK INDEX", "S&P 500 VIX","DOW JONES INDUSTRIAL AVERAGE"],
-                "Financial":["FED FUNDS", "UST 10Y NOTE"]
+            # "all" -> the full curated+tail index, anything else -> curated only.
+            meta_key = COT_POS_META_ALL_KEY if scope == "all" else COT_POS_META_KEY
+
+            # decode_responses=True on the pool -> str, or None if the index key
+            # has expired / never been written. `wanted` is the instrument names.
+            meta_raw = await self.aioredis.get(meta_key)
+            meta = json.loads(meta_raw) if meta_raw else {}
+            wanted = set(meta.get("instruments", []))
+            if not wanted:
+                logging.info(f"No instruments listed in {meta_key}")
+                return {}
+
+            # The meta index stores instrument names only; the Redis keys are
+            # cot_ttf:{market}:{name}:{date}, so map name -> market label from
+            # Postgres to build each scan pattern.
+            name_to_market = {
+                name: market
+                for market, name in await self.cot.get_distinct_instruments()
+                if name in wanted
             }
+            pairs = [(name_to_market[n], n) for n in wanted if n in name_to_market]
+            if not pairs:
+                logging.info("No index instruments resolve to a known market")
+                return {}
 
-            async def get_last_52(market: str, asset: str):
-                """Fetch one instrument's most recent 52 weekly COT hashes."""
-                pattern = f"cot_ttf:{market}:{asset}:*"
+            # Bounded fan-out: COT_POS_FULL_BATCH instruments per gather so the
+            # "all" scope (hundreds of contracts) doesn't open every SCAN at once.
+            series: dict = {}
+            for i in range(0, len(pairs), COT_POS_FULL_BATCH):
+                batch = pairs[i:i + COT_POS_FULL_BATCH]
+                results = await asyncio.gather(
+                    *(self._fetch_recent_weeks(m, n, weeks) for m, n in batch)
+                )
+                for asset, by_date in results:
+                    if by_date:
+                        series[asset] = self._net_pct_oi_history(by_date)
+            return series
+        except Exception as e:
+            logging.error(f"Error building net %OI time series: {e}", exc_info=True)
+            raise
 
-                # SCAN (non-blocking) rather than KEYS. count=100 is a hint for
-                # how much work per SCAN call, not a limit on results.
-                keys = [k async for k in self.aioredis.scan_iter(match=pattern, count=100)]
-                if not keys:
-                    return asset, {}          # instrument not in cache
+    async def instituitional_pos(self):
+        """Institutional (asset-manager) positioning per instrument, plus
+        leveraged-money and dealer positioning for context, for the curated
+        COT_CURATED_ASSETS shortlist.
 
-                # Keys end in an ISO date (YYYY-MM-DD), which sorts
-                # lexicographically == chronologically, so reverse sort puts
-                # the newest first; take 52 (~1 year of weekly reports).
-                recent_keys = sorted(keys, reverse=True)[:52]
-
-                # One pipelined round trip for all 52 HGETALLs.
-                pipe = self.aioredis.pipeline()
-                for k in recent_keys:
-                    pipe.hgetall(k)
-                rows = await pipe.execute()
-
-                # Re-key by report date and reverse back to oldest-first, which
-                # is the order _positioning_metrics' rolling windows expect.
-                # `if row` drops any key that raced with a TTL expiry.
-                return asset, {
-                    k.split(":")[-1]: row
-                    for k, row in reversed(list(zip(recent_keys, rows)))
-                    if row
-                }
-
-            # Fan out: one get_last_52 coroutine per (market, asset), all
-            # awaited together.
+        Pulls the last 52 weekly COT reports for each, runs
+        `_positioning_metrics`, and caches via `store_positioning` (per-asset
+        blobs with an LLM summary each + the cot_pos:_meta index). Returns
+        {asset: {category: {metric: value}}}.
+        """
+        try:
+            # Fan out: one _fetch_last_52 per (market, asset), awaited together.
             tasks = [
-                get_last_52(market, asset)
-                for market, assets in asset_list.items()
+                self._fetch_last_52(market, asset)
+                for market, assets in COT_CURATED_ASSETS.items()
                 for asset in assets
             ]
             results = await asyncio.gather(*tasks)
 
-            # Keep only instruments that returned data, score them, cache the
-            # snapshot, and hand the same dict back to the caller.
+            # Keep only instruments that actually had cached weekly hashes.
             data = {asset: rows for asset, rows in results if rows}
+            # Score them (percentile / z / momentum / label per category)...
             metrics = self._positioning_metrics(data)
+            # ...and write cot_pos:{asset} blobs + the cot_pos:_meta index.
             await self.store_positioning(metrics)
             return metrics
 
@@ -788,12 +847,83 @@ class COTController:
             logging.error(f"Error calculating instituitional Positioning:{e}", exc_info=True)
             raise
 
+    async def ensure_positioning(self, max_age_hours: int = 24 * 4) -> None:
+        """Populate the curated cot_pos:* snapshot only if it is missing or
+        older than `max_age_hours`. Meant for app startup: when the cache is
+        warm this is a single GET, so it is safe to call on every boot without
+        paying for the LLM fan-out each time.
+
+        The default 4-day window comfortably spans one weekly COT release
+        cycle, so a running app that also has the worker cron below will
+        essentially always hit the cheap path here.
+        """
+        try:
+            # store_positioning stamps _meta with an ISO "updated" timestamp.
+            raw = await self.aioredis.get(COT_POS_META_KEY)
+            if raw:
+                updated = json.loads(raw).get("updated")
+                if updated:
+                    # Fresh enough -> the cheap path: no fetch, no scoring, no LLM.
+                    age = datetime.now() - datetime.fromisoformat(updated)
+                    if age < timedelta(hours=max_age_hours):
+                        logging.info(f"cot_pos snapshot is {age} old - skipping refresh")
+                        return
+            # No index, or it's stale -> do the full curated rebuild.
+            logging.info("cot_pos snapshot missing or stale - rebuilding")
+            await self.instituitional_pos()
+        except Exception as e:
+            logging.error(f"ensure_positioning failed: {e}", exc_info=True)
+            raise
+
+    async def _write_positioning(self, metrics: dict, meta_key: str, meta: dict,
+                                 ttl: int, with_summary: bool) -> None:
+        """Shared writer for both positioning snapshots: one
+        f"{COT_POS_KEY_PREFIX}:{asset}" JSON blob per instrument, plus the
+        `meta` index blob at `meta_key`, all in a single pipeline / round trip.
+
+        with_summary=True fans out one LLM `breakdown_inst_positioning` per
+        instrument (return_exceptions=True - a failed one is logged and that
+        instrument is stored without a "summary" rather than sinking the batch).
+
+        The caller owns `meta` and `meta_key`: store_positioning writes the
+        curated COT_POS_META_KEY; store_full_positioning writes
+        COT_POS_META_ALL_KEY and never touches the curated key.
+        """
+        assets = list(metrics.keys())
+
+        # One LLM summary per instrument, launched together. The LLMController
+        # caps its own concurrency and retries 429s, so the fan-out is safe.
+        summaries: list = []
+        if with_summary:
+            summaries = await asyncio.gather(
+                *(self.llm.breakdown_inst_positioning(metrics[a]) for a in assets),
+                return_exceptions=True,
+            )
+
+        # N per-instrument blobs + the meta blob, same TTL, one round trip.
+        # Instrument names carry spaces / "&" - fine inside a Redis key.
+        pipe = self.aioredis.pipeline()
+        for i, asset in enumerate(assets):
+            cats = metrics[asset]
+            if with_summary:
+                summary = summaries[i]
+                if isinstance(summary, Exception):
+                    logging.error(f"breakdown_inst_positioning failed for {asset}: {summary}")
+                else:
+                    cats["summary"] = summary
+            pipe.set(f"{COT_POS_KEY_PREFIX}:{asset}", json.dumps(cats), ex=ttl)
+        pipe.set(meta_key, json.dumps(meta), ex=ttl)
+        await pipe.execute()
+
     async def store_positioning(self, metrics: dict, ttl: int = COT_POS_TTL) -> None:
-        """Cache the _positioning_metrics() output in Redis: one JSON object per
-        instrument at f"{COT_POS_KEY_PREFIX}:{asset}" ({category: {net_pct_oi,
-        percentile, score, z, mom_4w, label}}), plus a "_meta" object listing
-        the instruments and the update timestamp. All writes go through one
-        pipeline so the whole snapshot lands in a single round trip.
+        """Cache instituitional_pos()'s output: one JSON blob per instrument at
+        f"{COT_POS_KEY_PREFIX}:{asset}" ({category: {net_pct_oi, percentile,
+        score, z, mom_4w, label}}), each with an LLM summary, plus the
+        COT_POS_META_KEY index (the curated shortlist + update timestamp).
+
+        _meta lets get_positioning() enumerate the per-instrument keys with a
+        single GET instead of a SCAN, and carries the freshness timestamp the
+        frontend shows.
         """
         try:
             # Never overwrite a good snapshot with an empty one (e.g. a run
@@ -802,70 +932,126 @@ class COTController:
                 logging.info("No positioning metrics to store")
                 return
 
-            # _meta lets get_positioning() enumerate the per-instrument keys
-            # with a single GET instead of a SCAN, and carries the freshness
-            # timestamp the frontend shows.
             meta = {
                 "instruments": list(metrics.keys()),
                 "updated": datetime.now().isoformat(),
             }
-            
-            
-            
-
-            # One LLM summary per instrument, all launched together. The
-            # LLMController caps its own concurrency and retries 429s, so the
-            # fan-out is safe. return_exceptions=True: a failed summary is
-            # logged and that instrument is stored without one, rather than
-            # sinking the whole batch.
-            assets = list(metrics.keys())
-            summaries = await asyncio.gather(
-                *(self.llm.breakdown_inst_positioning(metrics[a]) for a in assets),
-                return_exceptions=True,
-            )
-
-            # One pipeline: N per-instrument JSON blobs + the _meta blob, all
-            # with the same TTL, in a single round trip. Instrument names carry
-            # spaces / "&" - fine inside a Redis key.
-            pipe = self.aioredis.pipeline()
-            for asset, summary in zip(assets, summaries):
-                cats = metrics[asset]
-                if isinstance(summary, Exception):
-                    logging.error(f"breakdown_inst_positioning failed for {asset}: {summary}")
-                else:
-                    cats["summary"] = summary
-                pipe.set(f"{COT_POS_KEY_PREFIX}:{asset}", json.dumps(cats), ex=ttl)
-            pipe.set(f"{COT_POS_KEY_PREFIX}:_meta", json.dumps(meta), ex=ttl)
-            await pipe.execute()
+            await self._write_positioning(metrics, COT_POS_META_KEY, meta,
+                                          ttl, with_summary=True)
         except Exception as e:
             logging.error(f"Error storing positioning metrics to redis: {e}", exc_info=True)
             raise
 
-    async def get_positioning(self) -> dict:
-        """Read the cached positioning snapshot back out of Redis - the inverse
-        of store_positioning(). Returns {"meta": {...}, "instruments": {asset:
-        {category: {metrics}}}}. An empty "instruments" dict means the cache has
-        expired or instituitional_pos() has never run.
+    async def full_positioning(self, batch_size: int = COT_POS_FULL_BATCH,
+                               with_summary: bool = True) -> dict:
+        """Positioning metrics for every cot_ttf instrument that is NOT in
+        COT_CURATED_ASSETS (the long tail).
+
+        Discovers the universe from Postgres (get_distinct_instruments),
+        subtracts the curated names, fetches each instrument's last 52 weekly
+        reports in bounded batches, scores them via `_positioning_metrics`, and
+        caches through `store_full_positioning`. Returns
+        {asset: {category: {metric: value}}}.
+
+        with_summary=True (default) also generates an LLM breakdown per
+        instrument (same as the curated flow). This is the slow part - the
+        LLMController caps concurrency at 2 and pauses ~10s per call, so a few
+        hundred instruments take a while; pass with_summary=False for a
+        metrics-only refresh.
         """
         try:
+            curated = {a for assets in COT_CURATED_ASSETS.values() for a in assets}
+            instruments = [
+                (market, name)
+                for market, name in await self.cot.get_distinct_instruments()
+                if name not in curated
+            ]
+            if not instruments:
+                logging.info("No non-curated instruments to score")
+                return {}
+
+            # Bounded fan-out: batch_size instruments per gather so hundreds of
+            # contracts don't open hundreds of SCANs/pipelines at once.
+            data: dict = {}
+            for i in range(0, len(instruments), batch_size):
+                batch = instruments[i:i + batch_size]
+                results = await asyncio.gather(
+                    *(self._fetch_last_52(market, name) for market, name in batch)
+                )
+                data.update({name: rows for name, rows in results if rows})
+
+            metrics = self._positioning_metrics(data)
+            await self.store_full_positioning(metrics, with_summary=with_summary)
+            return metrics
+        except Exception as e:
+            logging.error(f"Error calculating full positioning: {e}", exc_info=True)
+            raise
+
+    async def store_full_positioning(self, metrics: dict, ttl: int = COT_POS_TTL,
+                                     with_summary: bool = True) -> None:
+        """Cache the long tail's positioning: one f"{COT_POS_KEY_PREFIX}:{asset}"
+        blob per instrument, plus a COT_POS_META_ALL_KEY index listing
+        curated + tail instruments (with a separate `tail` list).
+
+        with_summary=True attaches an LLM `breakdown_inst_positioning` to each
+        blob (same as store_positioning); with_summary=False skips the LLM
+        entirely (metrics only).
+
+        Reads COT_POS_META_KEY for the curated names but NEVER writes it - that
+        key stays store_positioning's, listing only the curated shortlist.
+        """
+        try:
+            if not metrics:
+                logging.info("No full positioning metrics to store")
+                return
+
+            # Curated names, read-only, from the curated index.
+            curated_raw = await self.aioredis.get(COT_POS_META_KEY)
+            curated = json.loads(curated_raw).get("instruments", []) if curated_raw else []
+
+            meta_all = {
+                "instruments": sorted(set(curated) | set(metrics)),
+                "tail": sorted(metrics),
+                "updated": datetime.now().isoformat(),
+            }
+            await self._write_positioning(metrics, COT_POS_META_ALL_KEY, meta_all,
+                                          ttl, with_summary=with_summary)
+        except Exception as e:
+            logging.error(f"Error storing full positioning to redis: {e}", exc_info=True)
+            raise
+
+    async def get_positioning(self, scope: str = "tracked") -> dict:
+        """Read a cached positioning snapshot back out of Redis.
+
+        scope="tracked" (default): the curated shortlist, via COT_POS_META_KEY.
+        scope="all": curated + long tail, via COT_POS_META_ALL_KEY. Curated
+        instruments carry a "summary"; tail ones don't.
+
+        Returns {"meta": {...}, "instruments": {asset: {category: {metrics}}}}.
+        An empty "instruments" dict means that index has expired or its
+        producer has never run.
+        """
+        try:
+            meta_key = COT_POS_META_ALL_KEY if scope == "all" else COT_POS_META_KEY
+
             # decode_responses=True on the pool -> str, or None if the key is
-            # gone. Missing _meta is normal (never populated / expired).
-            meta_raw = await self.aioredis.get(f"{COT_POS_KEY_PREFIX}:_meta")
+            # gone. A missing index is normal (never populated / expired).
+            meta_raw = await self.aioredis.get(meta_key)
             meta = json.loads(meta_raw) if meta_raw else {}
 
-            # Normal path: take the instrument list straight from _meta.
-            # Fallback: _meta expired but some per-instrument keys survive -
-            # SCAN for them and strip the prefix, skipping _meta itself.
+            # Normal path: instrument list straight from the index.
             assets = meta.get("instruments")
             if not assets:
+                # Fallback: index gone but per-instrument blobs survive - SCAN
+                # for them. This can't tell curated from tail, so it returns
+                # every cached instrument regardless of `scope`.
                 prefix = f"{COT_POS_KEY_PREFIX}:"
                 assets = [
                     k[len(prefix):]
                     async for k in self.aioredis.scan_iter(match=f"{prefix}*", count=100)
-                    if not k.endswith(":_meta")
+                    if not k.endswith((":_meta", ":_meta_all"))
                 ]
 
-            # Nothing cached at all - return the shape callers expect, empty.
             if not assets:
                 return {"meta": meta, "instruments": {}}
 
@@ -875,7 +1061,7 @@ class COTController:
                 pipe.get(f"{COT_POS_KEY_PREFIX}:{asset}")
             rows = await pipe.execute()
 
-            # Skip any instrument whose key expired between the _meta read and
+            # Skip any instrument whose key expired between the index read and
             # this batch (row is None).
             instruments = {
                 asset: json.loads(row)
@@ -886,8 +1072,6 @@ class COTController:
         except Exception as e:
             logging.error(f"Error getting positioning metrics from redis: {e}", exc_info=True)
             raise
-        
-    
-# if __name__ == "__main__":
-#     test = COTController()
-#     print(asyncio.run(test.instituitional_pos()))
+if __name__ == "__main__":
+    test = COTController()
+    print(asyncio.run(test.net_pct_oi_timeseries()))

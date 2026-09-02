@@ -201,6 +201,29 @@ class CotModell:
         except Exception as e:
             logging.error(f"Error getting all cot data")
             raise
-        
+
+    async def get_distinct_instruments(self) -> List[tuple[str, str]]:
+        """Every (market, market_and_exchange_names) pair in cot_ttf - the full
+        instrument universe. `market` is included because the Redis keys are
+        cot_ttf:{market}:{name}:{date}, so a caller needs it to build the scan
+        pattern. Rows with either column NULL are skipped.
+        """
+        try:
+            async with session_scope() as session:
+                query = text("""
+                    SELECT DISTINCT market, market_and_exchange_names
+                    FROM cot_ttf
+                    WHERE market IS NOT NULL
+                      AND market_and_exchange_names IS NOT NULL
+                """)
+                result = await session.exec(query)
+                return [
+                    (row["market"], row["market_and_exchange_names"])
+                    for row in result.mappings().all()
+                ]
+        except Exception as e:
+            logging.error(f"Error getting distinct cot instruments: {e}", exc_info=True)
+            raise
+
 # test = CotModell()
 # val = asyncio.run(test.get_all_last_year_cot())

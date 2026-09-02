@@ -30,6 +30,7 @@ from arq import create_pool
 from arq.connections import RedisSettings
 from arq import cron
 from cot import COT
+from controller.cot import COTController
 from model.market_overview import MarketOverview
 from controller.macro import MacroController
 from controller.cross_section import CrossSectionController
@@ -62,6 +63,7 @@ except RuntimeError:
 # this avoids re-establishing DB/Redis connections on every scheduled
 # invocation.
 cot_model = COT()
+cot_ctrl = COTController()
 market_ovw = MarketOverview()
 # cpi_crtl = CPIController()
 # ppi_ctrl = PPIController()
@@ -119,6 +121,14 @@ async def refresh_cross_section(ctx):
     await cross_section_ctrl.update_quandrant()
     logging.info(f"Running Cross Section analysis")
 
+async def full_cot_positioning(ctx):
+    await cot_ctrl.full_positioning()
+    logging.info(f"Running full COT positioning (non-curated instruments)")
+
+async def curated_cot_positioning(ctx):
+    await cot_ctrl.instituitional_pos()
+    logging.info(f"Running curated COT positioning refresh (cot_pos:_meta)")
+
 
 class WorkerSettings:
     # arq reads this class directly (via `arq worker.WorkerSettings`) to
@@ -160,6 +170,20 @@ class WorkerSettings:
         # why it's estimated once and cached, not re-fit live), so a
         # monthly cadence is plenty, well ahead of LEAD_TTL's 40-day expiry.
         cron(refresh_cross_section, day={1, 10, 15, 20, 25}, hour=22, minute=30, unique=True,
+            run_at_startup=False),
+        # Every Thursday at 01:00 - the day after cot_update, so the long-tail
+        # positioning (full_positioning: every non-curated cot_ttf instrument,
+        # with an LLM breakdown each) is scored against the freshly synced
+        # weekly reports. Slow (hundreds of rate-limited LLM calls); runs
+        # overnight. Writes cot_pos:_meta_all; never touches cot_pos:_meta.
+        cron(full_cot_positioning, weekday="sun", hour=1, unique=True,
+            run_at_startup=False),
+        # Every Thursday at 00:30 - also the day after cot_update, and ahead of
+        # the full sweep above. Rescore the curated COT_CURATED_ASSETS shortlist
+        # and rewrite cot_pos:_meta + its blobs (each with an LLM summary). Only
+        # ~11 instruments, so this is quick. This is the job that keeps the
+        # startup snapshot (ensure_positioning) fresh while the app runs.
+        cron(curated_cot_positioning, weekday="sat", hour=0, minute=30, unique=True,
             run_at_startup=False),
     ]
 

@@ -48,7 +48,7 @@ async def lifespan(app: FastAPI):
         macro_ctrl.refresh_factor_stats(),
         market_overview.get_currency(),
         lse_ctrl.get_event_cal(),
-        cot_ctrl.instituitional_pos(),
+        cot_ctrl.ensure_positioning(),
         cross_sec.update_quandrant(),
         return_exceptions=True
     )
