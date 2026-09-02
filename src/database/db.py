@@ -26,6 +26,7 @@ sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from convex import ConvexClient
 from dotenv import load_dotenv
 import logging
+logger = logging.getLogger(__name__)
 from supabase import Client, ClientOptions, create_client
 from config.config import get_doppler_env
 from sqlalchemy.ext.asyncio import create_async_engine
@@ -50,7 +51,7 @@ def db_connect():
     try:
         return supabase
     except Exception as e:
-        logging.error(f'Error connection to the database : {e}', exc_info=True)
+        logger.error(f'Error connection to the database : {e}', exc_info=True)
 
 
 

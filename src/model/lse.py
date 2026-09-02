@@ -15,6 +15,7 @@ See sql/add_period_column.sql for why the key is (country_code, period).
 
 import asyncio
 import logging
+logger = logging.getLogger(__name__)
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -59,7 +60,7 @@ class LSEModel:
                 return table,[LSEType.model_validate(row) for row in rows]
             
         except Exception as e:
-            logging.error(f"Error getting the last PPI report for each country: {e}", exc_info=True)
+            logger.error(f"Error getting the last PPI report for each country: {e}", exc_info=True)
             raise
 
     async def get_trailing_stats(self, table: str, years: int = 5) -> dict[str, dict[str, float]]:
@@ -104,7 +105,7 @@ class LSEModel:
             }
 
         except Exception as e:
-            logging.error(f"Error getting trailing stats for {table}: {e}", exc_info=True)
+            logger.error(f"Error getting trailing stats for {table}: {e}", exc_info=True)
             raise
 
     async def get_monthly_series(self, table: str, months: int = 72) -> dict[str, List[tuple]]:
@@ -156,7 +157,7 @@ class LSEModel:
             }
 
         except Exception as e:
-            logging.error(f"Error getting monthly series for {table}: {e}", exc_info=True)
+            logger.error(f"Error getting monthly series for {table}: {e}", exc_info=True)
             raise
 
     async def insert_event(self, data: List[_EconIndicatorWithForecast]) -> List[_EconIndicatorWithForecast]:
@@ -212,7 +213,7 @@ class LSEModel:
             return list(deduped.values())
 
         except Exception as e:
-            logging.error(f"Error inserting data into the table: {e}", exc_info=True)
+            logger.error(f"Error inserting data into the table: {e}", exc_info=True)
             raise
 
 

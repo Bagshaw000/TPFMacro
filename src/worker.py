@@ -18,6 +18,7 @@ to run and where its own job queue lives.
 
 import asyncio
 import logging
+logger = logging.getLogger(__name__)
 import os
 import sys
 
@@ -40,6 +41,7 @@ from controller.economic_event import EconomicEventController
 from controller.news import NewsSentimentController
 # from controller.cross_section import CrossSectionController
 from controller.lse_ import LSEController
+from logging_config import configure_logging
 
 try:
     # Check if a loop already exists
@@ -82,57 +84,67 @@ cross_section_ctrl = CrossSectionController()
 async def cot_update(ctx):
     await cot_model.update_cot()
     # print("Running")
-    logging.info(f"Running COT worker with id ")
+    logger.info(f"Running COT worker with id ")
 
 async def currency_snapshot(ctx):
 
     await market_ovw.get_currency()
-    logging.info(f"Running currency snapshot worker")
+    logger.info(f"Running currency snapshot worker")
 
 async def get_events(ctx):
     await econ_event_ctrl.store_economic_event()
-    logging.info(f"Running economic event worker")
+    logger.info(f"Running economic event worker")
 
 async def get_lse(ctx):
     await lse_ctrl.get_event_cal()
-    logging.info(f"Running LSE worker with id ")
+    logger.info(f"Running LSE worker with id ")
 
 # async def get_ppi(ctx):
 #     await ppi_ctrl.get_ppi()
-#     logging.info(f"Runnin Ppi worker with id")
+#     logger.info(f"Runnin Ppi worker with id")
 
 # async def get_unemp(ctx):
 #     await unemp_ctrl.get_unemp()
-#     logging.info(f"Runnin Unemployment rate worker with id")
+#     logger.info(f"Runnin Unemployment rate worker with id")
 
 # async def get_gdp(ctx):
 #     await gdp_ctrl.get_gdp()
-#     logging.info(f"Running GDP worker")
+#     logger.info(f"Running GDP worker")
 
 async def get_new_sentiment(ctx):
     await news_sentiment_ctrl.all_country_sentiment()
-    logging.info(f"Running news sentiment")
+    logger.info(f"Running news sentiment")
 
 async def refresh_factor_stats(ctx):
     await macro_ctrl.refresh_factor_stats()
-    logging.info(f"Running factor stats refresh worker")
+    logger.info(f"Running factor stats refresh worker")
 
 async def refresh_cross_section(ctx):
     await cross_section_ctrl.update_quandrant()
-    logging.info(f"Running Cross Section analysis")
+    logger.info(f"Running Cross Section analysis")
 
 async def full_cot_positioning(ctx):
     await cot_ctrl.full_positioning()
-    logging.info(f"Running full COT positioning (non-curated instruments)")
+    logger.info(f"Running full COT positioning (non-curated instruments)")
 
 async def curated_cot_positioning(ctx):
     await cot_ctrl.instituitional_pos()
-    logging.info(f"Running curated COT positioning refresh (cot_pos:_meta)")
+    logger.info(f"Running curated COT positioning refresh (cot_pos:_meta)")
+
+
+async def on_startup(ctx):
+    # Runs after arq has installed its own logging config, so this call
+    # (force=True) restores the project's format + file handler for the worker
+    # process. The API process does the equivalent from main.py.
+    configure_logging()
+    logger.info("arq worker started")
 
 
 class WorkerSettings:
     # arq reads this class directly (via `arq worker.WorkerSettings`) to
     # know which jobs to schedule and how to reach its own job-queue Redis.
+
+    on_startup = on_startup
 
     cron_jobs = [
         # Every Wednesday at 23:00 - weekly CFTC COT reports are typically

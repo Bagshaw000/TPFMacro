@@ -14,6 +14,7 @@ whole run.
 import asyncio
 import json
 import logging
+logger = logging.getLogger(__name__)
 import os
 import random
 import sys
@@ -104,7 +105,7 @@ class LLMController:
                 if response.status_code not in _LLM_RETRY_STATUS or attempt == _LLM_MAX_RETRIES - 1:
                     break
                 delay = self._retry_delay(response, attempt)
-                logging.warning(
+                logger.warning(
                     f"LLM {response.status_code}; retrying in {delay:.1f}s "
                     f"(attempt {attempt + 1}/{_LLM_MAX_RETRIES})"
                 )
@@ -143,7 +144,7 @@ class LLMController:
             )
             return await self._chat(prompt)
         except Exception as e:
-            logging.error(f"Error breaking down Instituitional positioning: {e}", exc_info=True)
+            logger.error(f"Error breaking down Instituitional positioning: {e}", exc_info=True)
             raise
 
     async def global_breakdown(self, data):
@@ -208,7 +209,7 @@ class LLMController:
             )
             return await self._chat(prompt)
         except Exception as e:
-            logging.error(f"Error summarizing global breakdown: {e}", exc_info=True)
+            logger.error(f"Error summarizing global breakdown: {e}", exc_info=True)
             raise
 
     async def breakdown_by_country(self, data, country: str | None = None):
@@ -274,7 +275,7 @@ class LLMController:
             )
             return await self._chat(prompt)
         except Exception as e:
-            logging.error(f"Erros in summarizing the country {e}", exc_info=True)
+            logger.error(f"Erros in summarizing the country {e}", exc_info=True)
             raise
 
 

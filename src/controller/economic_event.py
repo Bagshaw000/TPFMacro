@@ -18,6 +18,7 @@ import asyncio
 from collections import defaultdict
 import json
 import logging
+logger = logging.getLogger(__name__)
 from typing import Awaitable, List, cast
 import pandas as pd
 import yfinance as yf
@@ -62,7 +63,7 @@ class EconomicEventController:
 
             return ev_model
         except Exception as e:
-            logging.error(f"Error getting economic events: {e}", exc_info=True)
+            logger.error(f"Error getting economic events: {e}", exc_info=True)
 
     #   This function store economic events
     async def store_economic_event(self):
@@ -120,7 +121,7 @@ class EconomicEventController:
 
 
         except Exception as e:
-            logging.error(f"Error storing economic event: {e}", exc_info=True)
+            logger.error(f"Error storing economic event: {e}", exc_info=True)
             raise
 
     async def get_all_events(self):
@@ -193,7 +194,7 @@ class EconomicEventController:
             return sorted_events
 
         except Exception as e:
-            logging.error(f"Error getting all events: {e}", exc_info=True)
+            logger.error(f"Error getting all events: {e}", exc_info=True)
             raise
 
     async def get_event_country(self, country:str):
@@ -251,7 +252,7 @@ class EconomicEventController:
             return sorted_events
 
         except Exception as e:
-            logging.error(f"Error getting all events for {country} : {e}", exc_info=True)
+            logger.error(f"Error getting all events for {country} : {e}", exc_info=True)
             raise
 
 # test = EconomicEventController()

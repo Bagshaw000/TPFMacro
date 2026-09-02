@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 import json
 import logging
+logger = logging.getLogger(__name__)
 import re
 import sys
 import os
@@ -102,7 +103,7 @@ class MarketOverview:
             curr_tru = await asyncio.gather(*true_task)
           
         except Exception as e:
-            logging.error(f"Error in currency pipeline {e}", exc_info=True)
+            logger.error(f"Error in currency pipeline {e}", exc_info=True)
     
     async def get_currency_ytd(self, ticker:str,pattern:str):
         """Full 1-year daily OHLCV history for one pair from yfinance, written
@@ -138,7 +139,7 @@ class MarketOverview:
                 await asyncio.sleep(1)
             
         except Exception as e:
-            logging.error("Error get currency year to date", exc_info=True)
+            logger.error("Error get currency year to date", exc_info=True)
             
             
     async def get_currency_last_entry(self,ticker:str, pattern:str):
@@ -176,7 +177,7 @@ class MarketOverview:
                 await asyncio.sleep(1)
                 
         except Exception as e:
-            logging.error("Error implementing last currency entry", exc_info=True)
+            logger.error("Error implementing last currency entry", exc_info=True)
     
     
     async def get_symbol_data(self, ticker, category):
@@ -198,7 +199,7 @@ class MarketOverview:
             return sorted_data
             
         except Exception as e:
-            logging.error("Error getting Symbols data", exc_info=True)
+            logger.error("Error getting Symbols data", exc_info=True)
             return {}
             
             
@@ -224,7 +225,7 @@ class MarketOverview:
             
             return paired_results
         except Exception as e:
-            logging.error("Error getting featured data", exc_info=True)
+            logger.error("Error getting featured data", exc_info=True)
             
             
     async def get_equity_data(self):
@@ -235,7 +236,7 @@ class MarketOverview:
             
             
         except Exception as e:
-            logging.error("Error getting equity data", exc_info=True)
+            logger.error("Error getting equity data", exc_info=True)
             
     async def get_economic_event(self, countries: str = "US, DE, GB, EU, HU, PL, CA, AU, NZ, JP, CH, SE, TR, NO, ZA, SG, MX"):
         """Pull the next 7 days of the RapidAPI "ultimate economic calendar" for
@@ -267,7 +268,7 @@ class MarketOverview:
             news_data = response.json()
             
             if news_data.get("status") != "ok":
-                logging.error("Error fetching news api 1", exc_info=True)
+                logger.error("Error fetching news api 1", exc_info=True)
                 return
             
             countries_list = countries.replace(" ",'').split(",")
@@ -277,7 +278,7 @@ class MarketOverview:
             
             return news_data
         except Exception as e:
-            logging.error('Error getting Economice event',exc_info=True)
+            logger.error('Error getting Economice event',exc_info=True)
             
             
     def sanitize_redis_key(self,key: str) -> str:
@@ -297,7 +298,7 @@ class MarketOverview:
         try:
             #
             if not events:
-                logging.info("No events to store")
+                logger.info("No events to store")
                 return
           
             pipeline = self.redis.pipeline()
@@ -314,7 +315,7 @@ class MarketOverview:
                     
             pipeline.execute()
         except Exception as e:
-            logging.error("Error Storing single event",exc_info=True)
+            logger.error("Error Storing single event",exc_info=True)
             
     async def store_event_parrallel(self, events: list[dict], countries:list)  :
         """Compute a per-event TTL (calculate_ttl), group events by country, and
@@ -345,7 +346,7 @@ class MarketOverview:
             
             await asyncio.gather(*store_tasks)
         except Exception as e:
-            logging.error("Error storing event by country")
+            logger.error("Error storing event by country")
             
     async def calculate_ttl(self, date_str: str) -> int:
         """Calculate TTL in seconds"""
@@ -366,7 +367,7 @@ class MarketOverview:
                
                 return 3600 
         except Exception as e:
-            logging.error(f"Error calculating TTL for {date_str}: {e}", exc_info=True)
+            logger.error(f"Error calculating TTL for {date_str}: {e}", exc_info=True)
             return 172800  # Default 2 days
         
         
@@ -400,7 +401,7 @@ class MarketOverview:
            
             return result_dict
         except Exception as e:
-            logging.error(f"Error in get news event",exc_info=True)
+            logger.error(f"Error in get news event",exc_info=True)
 
     async def symbol_snapshot(self,ticker:str, category:str):
         """One instrument's headline stats over its last ~252 trading days
@@ -458,7 +459,7 @@ class MarketOverview:
             
             return data
         except Exception as e:
-            logging.error(f"Error getting symbol snapshot {e}", exc_info=True)
+            logger.error(f"Error getting symbol snapshot {e}", exc_info=True)
 
     
     async def symbol_correlation(self, ticker:str,category:str):
@@ -551,7 +552,7 @@ class MarketOverview:
             results = await asyncio.to_thread(process_records,records)
             return results
         except Exception as e:
-            logging.error(f"Error in calculating {ticker} in {category} calculation", exc_info=True)
+            logger.error(f"Error in calculating {ticker} in {category} calculation", exc_info=True)
 
     
     async def symbol_technical_signals(self, ticker:str,category:str):
@@ -612,7 +613,7 @@ class MarketOverview:
             
                     
                 except Exception as e:
-                    logging.error(f"Error calculating RSI {e}", exc_info=True)
+                    logger.error(f"Error calculating RSI {e}", exc_info=True)
                     return {}
                 
             def atr(df:pd.DataFrame):
@@ -646,7 +647,7 @@ class MarketOverview:
                     
                     return data
                 except Exception as e:
-                    logging.error(f"Error calculating ATR {e}", exc_info=True)
+                    logger.error(f"Error calculating ATR {e}", exc_info=True)
                     return {}
             
             def ema_20(df:pd.DataFrame):
@@ -665,7 +666,7 @@ class MarketOverview:
                     }
                     return data
                 except Exception as e:
-                    logging.error(f"Error calculating EMA20 {e}", exc_info=True)
+                    logger.error(f"Error calculating EMA20 {e}", exc_info=True)
                     
           
             # Use multithreading
@@ -681,7 +682,7 @@ class MarketOverview:
             
             return  result_corr, result_vol, result_ema
         except Exception as e:
-            logging.error(f"Error calculating technical signal {e}", exc_info=True)
+            logger.error(f"Error calculating technical signal {e}", exc_info=True)
 
 
 

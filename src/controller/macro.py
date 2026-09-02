@@ -54,6 +54,7 @@ from custom_types.cpi import countries, country_mapping, get_country_code
 from model.lse import LSEModel
 from controller.lse_ import events_
 import logging
+logger = logging.getLogger(__name__)
 
 
 
@@ -247,7 +248,7 @@ class MacroController:
             await pipeline.execute()
 
         except Exception as e:
-            logging.error(f"Error refreshing factor stats: {e}", exc_info=True)
+            logger.error(f"Error refreshing factor stats: {e}", exc_info=True)
             raise
 
     async def get_factor_stats(self, country: str) -> dict:
@@ -269,7 +270,7 @@ class MacroController:
                 for macro, value in zip(events_, results)
             }
         except Exception as e:
-            logging.error(f"Error getting factor stats for {country}: {e}", exc_info=True)
+            logger.error(f"Error getting factor stats for {country}: {e}", exc_info=True)
             raise
 
     # async def get_economic_cycle(self, country: str) -> dict:
@@ -346,7 +347,7 @@ class MacroController:
     #         }
 
     #     except Exception as e:
-    #         logging.error(f"Error getting economic cycle for {country}: {e}", exc_info=True)
+    #         logger.error(f"Error getting economic cycle for {country}: {e}", exc_info=True)
     #         raise
 
     async def get_global_cycle(self) -> dict:
@@ -484,7 +485,7 @@ class MacroController:
             return cycles
 
         except Exception as e:
-            logging.error(f"Error getting global economic cycle: {e}", exc_info=True)
+            logger.error(f"Error getting global economic cycle: {e}", exc_info=True)
             raise
 
     async def get_cross_section_panel(self) -> dict:
@@ -563,7 +564,7 @@ class MacroController:
                     if points
                 )
                 if datetime.now() - latest_date > timedelta(days=STALE_DATA_DAYS):
-                    logging.warning(
+                    logger.warning(
                         f"Cross-section panel for {xs_code}: most recent reading is from "
                         f"{latest_date.date()}, older than {STALE_DATA_DAYS} days - sync may be stalled."
                     )
@@ -578,7 +579,7 @@ class MacroController:
             return panel
 
         except Exception as e:
-            logging.error(f"Error building cross-section panel: {e}", exc_info=True)
+            logger.error(f"Error building cross-section panel: {e}", exc_info=True)
             raise
 
     async def get_global_avg(self):
@@ -620,7 +621,7 @@ class MacroController:
 
 
         except Exception as e:
-            logging.error(f"Error getting global average", exc_info=True)
+            logger.error(f"Error getting global average", exc_info=True)
             raise
 
     async def get_global_stats(self)   :
@@ -701,7 +702,7 @@ class MacroController:
 
 
         except Exception as e:
-            logging.error(f"Error getting global stats: {e}", exc_info=True)
+            logger.error(f"Error getting global stats: {e}", exc_info=True)
             raise
 
     async def get_country_stats(self, country:str):
@@ -778,7 +779,7 @@ class MacroController:
 
             return data
         except Exception as e:
-            logging.error(f"Error getting countries macro data")
+            logger.error(f"Error getting countries macro data")
             raise
         
     async def get_country_stats_timeseries(self, country: str, months: int = 14) -> dict:
@@ -822,7 +823,7 @@ class MacroController:
                 for macro, by_country in zip(events_, series)
             }
         except Exception as e:
-            logging.error(f"Error getting all the country timeseries {e}", exc_info=True)
+            logger.error(f"Error getting all the country timeseries {e}", exc_info=True)
             raise
 # if __name__ == "__main__":
 #     test = MacroController()

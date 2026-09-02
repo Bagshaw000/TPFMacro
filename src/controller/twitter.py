@@ -18,6 +18,7 @@ from typing import List
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import asyncio
 import logging
+logger = logging.getLogger(__name__)
 from Scweet import Scweet, ScweetConfig, ScweetDB
 from config.config import get_doppler_env
 import pandas as pd
@@ -56,7 +57,7 @@ class TwitterController:
                 
                 return tweets
             except Exception as e:
-                logging.error(f"Issue scraping tweet for {country}: {e}", exc_info=True)
+                logger.error(f"Issue scraping tweet for {country}: {e}", exc_info=True)
                 raise 
     
     async def active_sentiment(self):
@@ -88,7 +89,7 @@ class TwitterController:
             
             
         except Exception as e:
-            logging.error(f"Error getting tweet : {e}", exc_info=True)
+            logger.error(f"Error getting tweet : {e}", exc_info=True)
             raise 
         
     async def extract_sentiment(self, tweet:List[dict], country:str):
@@ -111,7 +112,7 @@ class TwitterController:
                 
             
         except Exception as e:
-            logging.error(f"Error extracting sentiment: {e}", exc_info=True)
+            logger.error(f"Error extracting sentiment: {e}", exc_info=True)
             raise
     
     async def extract_tweet_info(self,tweet):

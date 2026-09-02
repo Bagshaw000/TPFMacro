@@ -15,6 +15,7 @@ import asyncio
 from datetime import datetime, timedelta
 import json
 import logging
+logger = logging.getLogger(__name__)
 import math
 import sys
 import os
@@ -111,7 +112,7 @@ class COTController:
 
                 # If batch data is not returned then stop operations
                 if not data_list:
-                    logging.info("data list is empty")
+                    logger.info("data list is empty")
                     return
 
                 # Update redis records
@@ -119,7 +120,7 @@ class COTController:
 
 
                 if not insert_data:
-                    logging.info("Failed to update redis cot data")
+                    logger.info("Failed to update redis cot data")
                     return
 
             # If data is our redis convert data to dataframe for further processing
@@ -132,7 +133,7 @@ class COTController:
 
             # Ensure all asset class converts properly
             if not currency_data or not indices_data or not financial_data or not crypto_data:
-                logging.info("Error in coverting to redis")
+                logger.info("Error in coverting to redis")
                 return
 
             # Calculate the percentage change for all asset classes
@@ -150,7 +151,7 @@ class COTController:
 
 
         except Exception as e:
-            logging.error(f"Error getting data : {e}", exc_info=True)
+            logger.error(f"Error getting data : {e}", exc_info=True)
             raise
 
 
@@ -255,7 +256,7 @@ class COTController:
 
             return data
         except Exception as e:
-            logging.error(f"Error getting data : {e}", exc_info=True)
+            logger.error(f"Error getting data : {e}", exc_info=True)
 
     # Convert redis to dataframe
     async def new_covert_redis_dataframe(self, asset_list:list, asset_cls:str):
@@ -276,7 +277,7 @@ class COTController:
             return {asset: rows for asset, rows in results if rows}
 
         except Exception as e:
-            logging.error(f"Converting redis to dataframe", exc_info=True)
+            logger.error(f"Converting redis to dataframe", exc_info=True)
             raise
 
 
@@ -359,7 +360,7 @@ class COTController:
 
 
         except Exception as e:
-            logging.error(f"Error inserting into redis data : {e}",exc_info=True)
+            logger.error(f"Error inserting into redis data : {e}",exc_info=True)
             raise
 
     # Get the expiration for 60 weeks in seconds
@@ -407,7 +408,7 @@ class COTController:
 
                     # If batch data is not returned then stop operations
                     if not data_list:
-                        logging.info("data list is empty")
+                        logger.info("data list is empty")
                         return
 
                     # Insert redis records
@@ -424,19 +425,19 @@ class COTController:
 
                         # If batch data is not returned then stop operations
                         if not data_list:
-                            logging.info("data list is empty")
+                            logger.info("data list is empty")
                             return
 
                         # Insert redis records
                         await self.insert_cot_redis(data_list)
 
                 await  self.aioredis.set("cot_status",1)
-                logging.info(f"Redis has been updated")
+                logger.info(f"Redis has been updated")
 
-            logging.info(f"Redis is already updated")
+            logger.info(f"Redis is already updated")
 
         except Exception as e:
-            logging.error(f"Error setting up redis: {e}", exc_info=True)
+            logger.error(f"Error setting up redis: {e}", exc_info=True)
             raise
 
     # Trader categories scored for positioning, each as (long_field, short_field).
@@ -636,7 +637,7 @@ class COTController:
             # category short on history), so callers only see real results.
             return {inst: cats for inst, cats in metrics.items() if cats}
         except Exception as e:
-            logging.error(f"Error computing positioning metrics: {e}", exc_info=True)
+            logger.error(f"Error computing positioning metrics: {e}", exc_info=True)
             raise
 
     async def _fetch_last_52(self, market: str, asset: str) -> tuple[str, dict]:
@@ -752,7 +753,7 @@ class COTController:
             meta = json.loads(meta_raw) if meta_raw else {}
             wanted = set(meta.get("instruments", []))
             if not wanted:
-                logging.info(f"No instruments listed in {meta_key}")
+                logger.info(f"No instruments listed in {meta_key}")
                 return {}
 
             # The meta index stores instrument names only; the Redis keys are
@@ -765,7 +766,7 @@ class COTController:
             }
             pairs = [(name_to_market[n], n) for n in wanted if n in name_to_market]
             if not pairs:
-                logging.info("No index instruments resolve to a known market")
+                logger.info("No index instruments resolve to a known market")
                 return {}
 
             # Bounded fan-out: COT_POS_FULL_BATCH instruments per gather so the
@@ -781,7 +782,7 @@ class COTController:
                         series[asset] = self._net_pct_oi_history(by_date)
             return series
         except Exception as e:
-            logging.error(f"Error building net %OI time series: {e}", exc_info=True)
+            logger.error(f"Error building net %OI time series: {e}", exc_info=True)
             raise
 
     async def asset_group_changes(self, asset: str, market: str | None = None,
@@ -821,13 +822,13 @@ class COTController:
                     None,
                 )
                 if market is None:
-                    logging.info(f"{asset} not found in cot_ttf")
+                    logger.info(f"{asset} not found in cot_ttf")
                     return {}
 
             # {report_date: hash} for the newest `weeks` reports, oldest-first.
             _, by_date = await self._fetch_recent_weeks(market, asset, weeks)
             if not by_date:
-                logging.info(f"No cached COT hashes for {market}:{asset}")
+                logger.info(f"No cached COT hashes for {market}:{asset}")
                 return {}
 
             # One row per weekly report; coerce + sort ascending by date.
@@ -882,7 +883,7 @@ class COTController:
                 "groups": groups,
             }
         except Exception as e:
-            logging.error(f"Error computing asset group changes for {asset}: {e}", exc_info=True)
+            logger.error(f"Error computing asset group changes for {asset}: {e}", exc_info=True)
             raise
 
     async def instituitional_pos(self):
@@ -913,7 +914,7 @@ class COTController:
             return metrics
 
         except Exception as e:
-            logging.error(f"Error calculating instituitional Positioning:{e}", exc_info=True)
+            logger.error(f"Error calculating instituitional Positioning:{e}", exc_info=True)
             raise
 
     async def ensure_positioning(self, max_age_hours: int = 24 * 4) -> None:
@@ -935,13 +936,13 @@ class COTController:
                     # Fresh enough -> the cheap path: no fetch, no scoring, no LLM.
                     age = datetime.now() - datetime.fromisoformat(updated)
                     if age < timedelta(hours=max_age_hours):
-                        logging.info(f"cot_pos snapshot is {age} old - skipping refresh")
+                        logger.info(f"cot_pos snapshot is {age} old - skipping refresh")
                         return
             # No index, or it's stale -> do the full curated rebuild.
-            logging.info("cot_pos snapshot missing or stale - rebuilding")
+            logger.info("cot_pos snapshot missing or stale - rebuilding")
             await self.instituitional_pos()
         except Exception as e:
-            logging.error(f"ensure_positioning failed: {e}", exc_info=True)
+            logger.error(f"ensure_positioning failed: {e}", exc_info=True)
             raise
 
     async def _write_positioning(self, metrics: dict, meta_key: str, meta: dict,
@@ -977,7 +978,7 @@ class COTController:
             if with_summary:
                 summary = summaries[i]
                 if isinstance(summary, Exception):
-                    logging.error(f"breakdown_inst_positioning failed for {asset}: {summary}")
+                    logger.error(f"breakdown_inst_positioning failed for {asset}: {summary}")
                 else:
                     cats["summary"] = summary
             pipe.set(f"{COT_POS_KEY_PREFIX}:{asset}", json.dumps(cats), ex=ttl)
@@ -998,7 +999,7 @@ class COTController:
             # Never overwrite a good snapshot with an empty one (e.g. a run
             # where every instrument was short on history).
             if not metrics:
-                logging.info("No positioning metrics to store")
+                logger.info("No positioning metrics to store")
                 return
 
             meta = {
@@ -1008,7 +1009,7 @@ class COTController:
             await self._write_positioning(metrics, COT_POS_META_KEY, meta,
                                           ttl, with_summary=True)
         except Exception as e:
-            logging.error(f"Error storing positioning metrics to redis: {e}", exc_info=True)
+            logger.error(f"Error storing positioning metrics to redis: {e}", exc_info=True)
             raise
 
     async def full_positioning(self, batch_size: int = COT_POS_FULL_BATCH,
@@ -1036,7 +1037,7 @@ class COTController:
                 if name not in curated
             ]
             if not instruments:
-                logging.info("No non-curated instruments to score")
+                logger.info("No non-curated instruments to score")
                 return {}
 
             # Bounded fan-out: batch_size instruments per gather so hundreds of
@@ -1053,7 +1054,7 @@ class COTController:
             await self.store_full_positioning(metrics, with_summary=with_summary)
             return metrics
         except Exception as e:
-            logging.error(f"Error calculating full positioning: {e}", exc_info=True)
+            logger.error(f"Error calculating full positioning: {e}", exc_info=True)
             raise
 
     async def store_full_positioning(self, metrics: dict, ttl: int = COT_POS_TTL,
@@ -1071,7 +1072,7 @@ class COTController:
         """
         try:
             if not metrics:
-                logging.info("No full positioning metrics to store")
+                logger.info("No full positioning metrics to store")
                 return
 
             # Curated names, read-only, from the curated index.
@@ -1086,7 +1087,7 @@ class COTController:
             await self._write_positioning(metrics, COT_POS_META_ALL_KEY, meta_all,
                                           ttl, with_summary=with_summary)
         except Exception as e:
-            logging.error(f"Error storing full positioning to redis: {e}", exc_info=True)
+            logger.error(f"Error storing full positioning to redis: {e}", exc_info=True)
             raise
 
     async def get_positioning(self, scope: str = "tracked") -> dict:
@@ -1139,7 +1140,7 @@ class COTController:
             }
             return {"meta": meta, "instruments": instruments}
         except Exception as e:
-            logging.error(f"Error getting positioning metrics from redis: {e}", exc_info=True)
+            logger.error(f"Error getting positioning metrics from redis: {e}", exc_info=True)
             raise
 # if __name__ == "__main__":
 #     test = COTController()

@@ -53,6 +53,7 @@ from database.redis_ import RedisConnection
 from model.lse import LSEModel
 from lse import LSE
 import logging
+logger = logging.getLogger(__name__)
 
 
 def _parse_percentage(value: str | None, previous: str | None) -> float | None:
@@ -219,7 +220,7 @@ class LSEController:
 
 
         except Exception as e:
-            logging.error(f"Error getting event calendar: {e}", exc_info=True)
+            logger.error(f"Error getting event calendar: {e}", exc_info=True)
             raise e
 
     async def calendar_history(self, event:str,  recent_event: List[_EconIndicatorWithForecast] | None = None):
@@ -309,7 +310,7 @@ class LSEController:
 
 
         except Exception as e:
-            logging.error(f"Error getting event calendar history: {e}", exc_info=True)
+            logger.error(f"Error getting event calendar history: {e}", exc_info=True)
             raise e
 
     async def process_event(self, event:str, event_list: List[List]) -> List[_EconIndicatorWithForecast]:
@@ -336,7 +337,7 @@ class LSEController:
          
 
             if event not in events_:
-                logging.warning(f"Skipping unrecognized event type: {event}")
+                logger.warning(f"Skipping unrecognized event type: {event}")
                 return []
 
             model_type = ECON_INDICATOR_TYPES[event]
@@ -364,7 +365,7 @@ class LSEController:
                         
                         country_code_ = country_mapping.get(element_data.region_code)
                         if country_code_ is None:
-                            logging.warning(f"Skipping unmapped region code: {element_data.region_code}")
+                            logger.warning(f"Skipping unmapped region code: {element_data.region_code}")
                             continue
                         forecast = _parse_percentage(element_data.actual, element_data.previous)
                         if forecast is None:
@@ -387,7 +388,7 @@ class LSEController:
           
             return data_list
         except Exception as e:
-            logging.error(f"Error processing event: {e}", exc_info=True)
+            logger.error(f"Error processing event: {e}", exc_info=True)
             raise
 
     async def insert_redis(self, data: List[_EconIndicatorWithForecast]):
@@ -477,7 +478,7 @@ class LSEController:
             return avg_value
 
         except Exception as e:
-            logging.error(f"Error inserting into redis: {e}", exc_info=True)
+            logger.error(f"Error inserting into redis: {e}", exc_info=True)
             raise
 
 

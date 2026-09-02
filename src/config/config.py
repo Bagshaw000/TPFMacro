@@ -13,6 +13,7 @@ import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 import logging
+logger = logging.getLogger(__name__)
 from dopplersdk import DopplerSDK
 from dotenv import load_dotenv
 from custom_types.config import ConfigType
@@ -27,7 +28,7 @@ def doppler_secret()->ConfigType:
         
         if not token:
             
-            logging.info(f"Failed to fetch Doppler secrets")
+            logger.info(f"Failed to fetch Doppler secrets")
             raise RuntimeError(f"Failed to fetch Doppler secrets")
             
         
@@ -53,7 +54,7 @@ def doppler_secret()->ConfigType:
         
         
     except Exception as e:
-        logging.error(f"Error loading doppler secret: {e}")
+        logger.error(f"Error loading doppler secret: {e}")
         
 
 @lru_cache     

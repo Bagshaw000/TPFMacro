@@ -21,6 +21,7 @@ import asyncio
 from collections.abc import AsyncIterable
 import json
 import logging
+logger = logging.getLogger(__name__)
 import yfinance as yf
 
 router = APIRouter(prefix="/v1/symbol")
@@ -50,9 +51,9 @@ async def new_event(country: str):
             
     except asyncio.CancelledError:
         # This triggers automatically when the client closes the browser or tab
-        logging.info(f"Client disconnected from {country} stream.")
+        logger.info(f"Client disconnected from {country} stream.")
     except Exception as e:
-        logging.error(f"Error in stream for {country}: {e}", exc_info=True)
+        logger.error(f"Error in stream for {country}: {e}", exc_info=True)
 
 
 async def get_symbol(category: str, pair: str):
@@ -71,9 +72,9 @@ async def get_symbol(category: str, pair: str):
             
     except asyncio.CancelledError:
         # This triggers automatically when the client closes the browser or tab
-        logging.info(f"Client disconnected from {pair} {category} stream.")
+        logger.info(f"Client disconnected from {pair} {category} stream.")
     except Exception as e:
-        logging.error(f"Error in stream for {pair} {category} : {e}", exc_info=True)
+        logger.error(f"Error in stream for {pair} {category} : {e}", exc_info=True)
         
 
 def message_handler(message):
@@ -133,7 +134,7 @@ async def get_news_events(websocket:WebSocket,category: str, pair: str):
             
     except WebSocketDisconnect:
         print("Client disconnected")
-        logging.error("Client disconnected", exc_info=True)
+        logger.error("Client disconnected", exc_info=True)
 
 
 @router.websocket("/event/{country}")
@@ -146,7 +147,7 @@ async def get_symbol_data(websocket:WebSocket,country: str):
             await websocket.send_json(json.dumps(data))
     except WebSocketDisconnect:
             print("Client disconnected")
-            logging.error("Client disconnected", exc_info=True)
+            logger.error("Client disconnected", exc_info=True)
     
         
 @router.websocket("/event")
@@ -159,7 +160,7 @@ async def get_news_event(websocket:WebSocket):
             await websocket.send_json(json.dumps(data))
     except WebSocketDisconnect:
             print("Client disconnected")
-            logging.error("Client disconnected", exc_info=True)
+            logger.error("Client disconnected", exc_info=True)
             
             
 @router.get('/snapshot/{category}/{ticker}')
@@ -205,7 +206,7 @@ async def get_technical_signal(category:str, ticker:str):
 #             await asyncio.sleep(2) 
 #     except WebSocketDisconnect:
 #         print("Client disconnected")
-#         logging.error("Client disconnected", exc_info=True)
+#         logger.error("Client disconnected", exc_info=True)
         
 # @router.get("/event/{country}",response_class=EventSourceResponse)
 # async def featured_pair(country: str):

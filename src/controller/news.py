@@ -13,6 +13,7 @@ macro payloads. The worker refreshes this every 3 hours (get_new_sentiment).
 import asyncio
 from datetime import datetime, timedelta
 import logging
+logger = logging.getLogger(__name__)
 import sys
 import os
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -86,7 +87,7 @@ class NewsSentimentController:
        
 
         except Exception as e:
-            logging.error(f"Error getting new article: {e}", exc_info=True)
+            logger.error(f"Error getting new article: {e}", exc_info=True)
             raise
     
     
@@ -119,7 +120,7 @@ class NewsSentimentController:
             
             # Store sentiment
         except Exception as e:
-            logging.error(f"Error calculating news sentiment: {e}", exc_info=True)
+            logger.error(f"Error calculating news sentiment: {e}", exc_info=True)
             raise
         
         
@@ -133,7 +134,7 @@ class NewsSentimentController:
             senti = await redis.set(key, sentiment_score, ex=14400)
             return senti
         except Exception as e:
-            logging.error(f"Error storing sentiment value for country{country}: {e}",exc_info=True)
+            logger.error(f"Error storing sentiment value for country{country}: {e}",exc_info=True)
             raise
         
     
@@ -145,7 +146,7 @@ class NewsSentimentController:
                 store = await self.news_sentiment(ele)
                 
         except Exception as e:
-            logging.error(f"Error caloculation all country sentiment: {e}", exc_info=True)
+            logger.error(f"Error caloculation all country sentiment: {e}", exc_info=True)
             raise
         
         

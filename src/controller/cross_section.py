@@ -20,6 +20,7 @@ object.
 
 import json
 import logging
+logger = logging.getLogger(__name__)
 import os
 import sys
 
@@ -164,7 +165,7 @@ class CrossSectionController:
 
             return df_by_country, country_stats
         except Exception as e:
-            logging.error(f"Error loading data into a dataframe: {e}", exc_info=True)
+            logger.error(f"Error loading data into a dataframe: {e}", exc_info=True)
             raise
     
 
@@ -252,7 +253,7 @@ class CrossSectionController:
             return derived
 
         except Exception as e:
-            logging.error(f"Error implementing economic derivation: {e}", exc_info=True)
+            logger.error(f"Error implementing economic derivation: {e}", exc_info=True)
             raise
         
     async def normalized_factors(self, df: pd.DataFrame):
@@ -333,7 +334,7 @@ class CrossSectionController:
             return scores_df,z_scores_df
 
         except  Exception as e:
-            logging.error(f"Error Normalizing derived factors: {e}", exc_info=True)
+            logger.error(f"Error Normalizing derived factors: {e}", exc_info=True)
             raise
         
     async def calculate_composite(self, scores_df: pd.DataFrame):
@@ -396,7 +397,7 @@ class CrossSectionController:
             return result
 
         except Exception as e:
-            logging.error(f"Error calculating composite score", exc_info=True)
+            logger.error(f"Error calculating composite score", exc_info=True)
             raise
         
     async def assign_quadrants(self, composite_df: pd.DataFrame) -> pd.DataFrame:
@@ -455,7 +456,7 @@ class CrossSectionController:
 
             return composite_df
         except Exception as e:
-            logging.error(f"Error assigning quadrant: {e}", exc_info=True)
+            logger.error(f"Error assigning quadrant: {e}", exc_info=True)
             raise
 
     async def store_quadrants(self, composite_df: pd.DataFrame, ttl: int = QUADRANT_TTL) -> None:
@@ -486,7 +487,7 @@ class CrossSectionController:
             pipeline.set(f"{QUADRANT_KEY_PREFIX}:_meta", json.dumps(meta), ex=ttl)
             await pipeline.execute()
         except Exception as e:
-            logging.error(f"Error storing quadrants to redis: {e}", exc_info=True)
+            logger.error(f"Error storing quadrants to redis: {e}", exc_info=True)
             raise
 
     def performance_trend(self, full_df: pd.DataFrame, quarters: int = 8) -> dict:
@@ -568,7 +569,7 @@ class CrossSectionController:
                 'composite': composite
             }
         except Exception as e:
-            logging.error(f"Error in performing trend: {e}", exc_info=True)
+            logger.error(f"Error in performing trend: {e}", exc_info=True)
             raise
         
     async def update_quandrant(self):
@@ -597,9 +598,9 @@ class CrossSectionController:
             )
             for result in narration:
                 if isinstance(result, Exception):
-                    logging.error(f"Cross-section narration step failed: {result}", exc_info=result)
+                    logger.error(f"Cross-section narration step failed: {result}", exc_info=result)
         except Exception as e:
-            logging.error(f"Error updating the quandrant:{e}", exc_info=True)
+            logger.error(f"Error updating the quandrant:{e}", exc_info=True)
             raise
         
     async def get_cross_section(self, include_summary: bool = True) -> dict:
@@ -650,7 +651,7 @@ class CrossSectionController:
                 result["summary"] = await self.get_cross_section_breakdown() or None
             return result
         except Exception as e:
-            logging.error(f"Error getting cross section: {e}", exc_info=True)
+            logger.error(f"Error getting cross section: {e}", exc_info=True)
             raise
         
     async def get_cross_section_by_country(self, country: str) -> dict | None:
@@ -685,7 +686,7 @@ class CrossSectionController:
             row["summary"] = json.loads(summary_raw) if summary_raw else None
             return row
         except Exception as e:
-            logging.error(f"Error getting cross section for {country}: {e}", exc_info=True)
+            logger.error(f"Error getting cross section for {country}: {e}", exc_info=True)
             raise
     
     async def store_cross_section_by_country(self, ttl: int = BREAKDOWN_TTL) -> dict:
@@ -713,7 +714,7 @@ class CrossSectionController:
             meta = json.loads(meta_raw) if meta_raw else {}
             codes = meta.get("countries") or []
             if not codes:
-                logging.info("No cross-section snapshot to break down by country")
+                logger.info("No cross-section snapshot to break down by country")
                 return {}
 
             # Pull every country's quadrant row in one pipelined round trip
@@ -746,7 +747,7 @@ class CrossSectionController:
             write_pipe = self.redis.pipeline()
             for (code, _row), text in zip(present, texts):
                 if isinstance(text, Exception):
-                    logging.error(f"breakdown_by_country failed for {code}: {text}")
+                    logger.error(f"breakdown_by_country failed for {code}: {text}")
                     continue
                 if not text:
                     continue
@@ -766,7 +767,7 @@ class CrossSectionController:
                 await write_pipe.execute()
             return summaries
         except Exception as e:
-            logging.error(f"Error storing country cross section: {e}", exc_info=True)
+            logger.error(f"Error storing country cross section: {e}", exc_info=True)
             raise
 
     async def get_cross_section_breakdown_by_country(self, country: str) -> dict:
@@ -778,7 +779,7 @@ class CrossSectionController:
             raw = await self.redis.get(f"{BREAKDOWN_KEY}:{country.upper()}")
             return json.loads(raw) if raw else {}
         except Exception as e:
-            logging.error(f"Error getting country breakdown for {country}: {e}", exc_info=True)
+            logger.error(f"Error getting country breakdown for {country}: {e}", exc_info=True)
             raise
     
     async def store_cross_section_breakdown(self, ttl: int = BREAKDOWN_TTL) -> str | None:
@@ -795,12 +796,12 @@ class CrossSectionController:
             # Nothing cached to describe -> don't spend an LLM call or overwrite
             # a good previous narrative with an empty one.
             if not data.get("countries"):
-                logging.info("No cross-section snapshot to summarise")
+                logger.info("No cross-section snapshot to summarise")
                 return None
 
             summary = await self.llm.global_breakdown(data)
             if not summary:
-                logging.info("Empty cross-section summary from LLM")
+                logger.info("Empty cross-section summary from LLM")
                 return None
 
             payload = {
@@ -812,7 +813,7 @@ class CrossSectionController:
             await self.redis.set(BREAKDOWN_KEY, json.dumps(payload), ex=ttl)
             return summary
         except Exception as e:
-            logging.error(f"Error break down cross section breakdown: {e}", exc_info=True)
+            logger.error(f"Error break down cross section breakdown: {e}", exc_info=True)
             raise
 
     async def get_cross_section_breakdown(self) -> dict:
@@ -824,7 +825,7 @@ class CrossSectionController:
             raw = await self.redis.get(BREAKDOWN_KEY)
             return json.loads(raw) if raw else {}
         except Exception as e:
-            logging.error(f"Error getting cross section breakdown: {e}", exc_info=True)
+            logger.error(f"Error getting cross section breakdown: {e}", exc_info=True)
             raise
     
     

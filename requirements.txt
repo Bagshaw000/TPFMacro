@@ -82,6 +82,7 @@ pandas-datareader==0.11.1
 peewee==4.0.5
 platformdirs==4.9.6
 postgrest==2.28.3
+prometheus_client==0.26.0
 propcache==0.4.1
 protobuf==7.34.1
 psutil==5.9.8

@@ -31,6 +31,7 @@ import asyncio
 import numpy as np
 import json
 import logging
+logger = logging.getLogger(__name__)
 import math
 from typing import Optional
 import cot_reports as cot
@@ -68,7 +69,7 @@ class COT:
             df.to_csv('data/cot_fut.csv') 
             return df
         except Exception as e:
-            logging.error(f'Error getting all data : {e}' , exc_info=True)
+            logger.error(f'Error getting all data : {e}' , exc_info=True)
             raise
                 
         
@@ -86,7 +87,7 @@ class COT:
     
             cot_df.to_csv('data/cot_fut.csv')
         except Exception as e:
-            logging.error(f'Error agregatting data : {e}', exc_info=True)
+            logger.error(f'Error agregatting data : {e}', exc_info=True)
             raise 
         
     # Determine the asset market and standardized asset name
@@ -250,7 +251,7 @@ class COT:
             
                         
         except Exception as e: 
-            logging.error(f'Error determine market type : {e}', exc_info=True)
+            logger.error(f'Error determine market type : {e}', exc_info=True)
             raise
         
         
@@ -277,7 +278,7 @@ class COT:
             # Check for any columns that weren't renamed
             missing_columns = set(load_df.columns) - set(COT_COLUMN_MAPPING.values())
             if missing_columns:
-                logging.info(f"Warning: These columns weren't renamed: {missing_columns}")
+                logger.info(f"Warning: These columns weren't renamed: {missing_columns}")
                         
             # Rename the columns for ease of manipulation
             instrument_list:list =[]
@@ -297,7 +298,7 @@ class COT:
                     new_row["market"] = asset_cls
                     
                     if new_row == {} or new_row == None:
-                        logging.info("New Row was empty")
+                        logger.info("New Row was empty")
                         return
                     
                     new_cot = CotData(**new_row).model_dump()
@@ -308,7 +309,7 @@ class COT:
                 data = await self.cot_model.insert_tff_report(data)
                 
         except Exception as e:
-            logging.error(f"Error processing all data: {e}", exc_info=True)
+            logger.error(f"Error processing all data: {e}", exc_info=True)
             raise
         
     async def clean_row_data(self, row_dict: dict) -> dict:
@@ -446,10 +447,10 @@ class COT:
                 await self.cot_model.update_ttf_report(cot_models)
                 await self.cot_ctrl.insert_cot_redis(cot_models)
 
-                logging.info("Sucessfully updated Cot Data", exc_info=True)
+                logger.info("Sucessfully updated Cot Data", exc_info=True)
                 
         except Exception as e:
-            logging.error(f'Error updating cot data : {e}', exc_info=True)
+            logger.error(f'Error updating cot data : {e}', exc_info=True)
             raise
             
 # test = COTNew()

@@ -16,6 +16,7 @@ Every method runs inside `session_scope()` (auto commit / rollback).
 import asyncio
 from datetime import datetime
 import logging
+logger = logging.getLogger(__name__)
 import os
 import sys
 from typing import List
@@ -48,7 +49,7 @@ class CotModell:
                     return result
             
         except Exception as e:
-            logging.error("Error getting the last report")
+            logger.error("Error getting the last report")
             raise
         
     async def insert_tff_report(self, data:List[CotData]):
@@ -66,7 +67,7 @@ class CotModell:
             
             
         except Exception as e:
-            logging.error(f"Error inserting cot report: {e}")
+            logger.error(f"Error inserting cot report: {e}")
             raise
     
     
@@ -82,7 +83,7 @@ class CotModell:
                     
                     return list(result.all())
         except Exception as e:
-            logging.error(f"Error getting latest cot data {e}")
+            logger.error(f"Error getting latest cot data {e}")
             raise
         
         
@@ -101,7 +102,7 @@ class CotModell:
                     
                     return total
         except Exception as e:
-            logging.error(f"Error getting cot database size: {e}")
+            logger.error(f"Error getting cot database size: {e}")
             raise
         
         
@@ -153,7 +154,7 @@ class CotModell:
             }
             
         except Exception as e:
-            logging.error(f"Error updating TFF report : {e}")
+            logger.error(f"Error updating TFF report : {e}")
             raise
         
     async def get_last_entry(self)->List[CotData] :
@@ -178,7 +179,7 @@ class CotModell:
                 
         
         except Exception as e:
-            logging.error(f"Error getting the last entry: {e}", exc_info=True)
+            logger.error(f"Error getting the last entry: {e}", exc_info=True)
             raise 
         
         
@@ -193,7 +194,7 @@ class CotModell:
                     
                     return list(result.all())   
         except Exception as e:
-            logging.error(f"Error getting last year of cot data for {asset_name}: {e}", exc_info=True)  
+            logger.error(f"Error getting last year of cot data for {asset_name}: {e}", exc_info=True)  
             raise
         
     async def get_all_last_year_cot(self)->List[CotData]:
@@ -230,7 +231,7 @@ class CotModell:
                     return [CotData.model_validate(row) for row in rows ]
             
         except Exception as e:
-            logging.error(f"Error getting all cot data")
+            logger.error(f"Error getting all cot data")
             raise
 
     async def get_distinct_instruments(self) -> List[tuple[str, str]]:
@@ -253,7 +254,7 @@ class CotModell:
                     for row in result.mappings().all()
                 ]
         except Exception as e:
-            logging.error(f"Error getting distinct cot instruments: {e}", exc_info=True)
+            logger.error(f"Error getting distinct cot instruments: {e}", exc_info=True)
             raise
 
 # test = CotModell()
