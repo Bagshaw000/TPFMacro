@@ -1,13 +1,30 @@
+"""Shared types and lookups for the macro-indicator pipeline.
+
+Holds:
+  - `months`, `countries` : the fixed universe - 12 month abbreviations and the
+    11 tracked countries as 3-letter codes.
+  - `country_mapping` / `map_country_codes` : 2-letter (provider) -> 3-letter
+    (internal) country-code translation.
+  - `make_econ_indicator_type()` : factory that builds the SQLModel table class
+    for one LSE indicator (cpi / ppi / unemp / inflation / retail), all sharing
+    a `(country_code, period)` unique constraint. `ECON_INDICATOR_TYPES` is the
+    registry of the built classes.
+  - `EconomicEventType`, other small enums/models used across controllers.
+
+`period` is the "YYYY-MM" reference month - see sql/add_period_column.sql.
+"""
+
 from datetime import datetime
 from typing import Any, Literal, Optional, overload
 
 from pydantic import BaseModel
 from sqlmodel import Field, SQLModel, UniqueConstraint
-months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN', 
+months = ['JAN', 'FEB', 'MAR', 'APR', 'MAY', 'JUN',
                 'JUL', 'AUG', 'SEP', 'OCT', 'NOV', 'DEC']
 countries = ['USA','CAN','JPN','DEU','GBR','AUS','IND','CHN','KOR','BRA','FRA']
 
-# Comprehensive mapping dictionary
+# 2-letter provider code -> 3-letter internal code. Includes aliases
+# (e.g. both 'GB' and 'UK' -> 'GBR'); superset of `countries`.
 country_mapping= {
     # North America
     'US': 'USA',

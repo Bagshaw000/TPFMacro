@@ -1,3 +1,15 @@
+"""Schemas for the COT (Commitment of Traders) data.
+
+  - CFTCData : the raw CFTC report row, PascalCase field names exactly as the
+               provider returns them (from the `cot_reports` library). Used at
+               the ingest boundary in src/cot.py before mapping to CotData.
+  - CotData  : the SQLModel table (`cot_ttf`) the app actually stores and
+               queries - snake_case, typed, with validators that coerce the
+               provider's strings/blanks into the right types.
+
+Everything downstream (model/cot.py, controller/cot.py) works with CotData.
+"""
+
 from datetime import datetime
 
 from pydantic import BaseModel,  field_validator,ConfigDict

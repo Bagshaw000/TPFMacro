@@ -153,43 +153,6 @@ class COTController:
             logging.error(f"Error getting data : {e}", exc_info=True)
             raise
 
-    # !Incomplete
-    # This function interpretes the pct change for all instruments
-    async def interpret_pct_change(self, data:dict,asset_cls:str):
-        """Unfinished: intended to have an LLM generate a human-readable
-        explanation of each instrument's pct-change data, cached under
-        "cot_expl:{asset_cls}:{instrument}:{date}" so it's only computed
-        once per date. Currently only the cache-check/skip logic exists -
-        the actual LLM call and result-append step are not implemented
-        (see the trailing comments below the loop).
-        """
-        try:
-
-            # Check if the recent LLM intepretation exists
-
-
-            for instrument, instrument_data in data.items():
-                *rest, last = instrument_data.keys()
-
-                date_series = pd.to_datetime(rest).max().strftime('%Y-%m-%d')
-
-
-                # Search if the recent explanation has been set
-                instrument_key = f"cot_expl:{asset_cls}:{instrument}:{date_series}"
-                check_exp = self.redis.hgetall(instrument_key)
-
-
-                if check_exp:
-                    # Just append explanation to the  dict object
-                    continue
-
-                # Loop through pct change and ask LLM to explain append that to the Object
-
-            # Loop through the data and select 2 input for each field
-
-        except Exception as e:
-            logging.error("Error interpreting cot data")
-
 
     # Calculate the percentage change for a given period
     async def new_calculate_all_change(self, data:dict):
@@ -421,16 +384,7 @@ class COTController:
         return max(0, ttl_seconds)
 
 
-    # Unimplemented stub - always a no-op.
-    async def cot_asset_position(self, asset_name:str, asset_cls:str):
-        try:
-            # check if asset data exist in redis
-            pass
 
-
-        except Exception as e:
-            logging.error(f"Error calculating asset position")
-            raise
 
 
     # This setup redis to ensure data is coherent for database and redis
@@ -444,7 +398,7 @@ class COTController:
             cot_status =  await  self.aioredis.get("cot_status")
 
             # Check if the status updated
-            if cot_status != 1:
+            if int(cot_status) != 1:
                 check_cot =   self.redis.keys("cot_ttf*")
              
 
@@ -1187,6 +1141,6 @@ class COTController:
         except Exception as e:
             logging.error(f"Error getting positioning metrics from redis: {e}", exc_info=True)
             raise
-if __name__ == "__main__":
-    test = COTController()
-    print(asyncio.run(test.asset_group_changes("EURO FX")))
+# if __name__ == "__main__":
+#     test = COTController()
+#     print(asyncio.run(test.asset_group_changes("EURO FX")))

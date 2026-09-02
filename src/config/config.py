@@ -1,3 +1,13 @@
+"""Secret loading via Doppler.
+
+`get_doppler_env()` (memoised with lru_cache, so the fetch happens once per
+process) returns a `ConfigType` populated from the `tpf_macro` Doppler project,
+config `dev`. Every controller/model calls it for DB creds and API keys.
+
+Requires a `DOPPLER_TOKEN` in the environment (a service token). `load_dotenv()`
+lets that come from a local `.env` in development.
+"""
+
 from functools import lru_cache
 import sys
 import os

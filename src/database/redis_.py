@@ -1,3 +1,19 @@
+"""Redis client factory - the app's read cache (db 0), separate from the arq
+job-queue Redis in worker.py.
+
+`RedisConnection` hands out two clients:
+
+  - get_redis()       : synchronous (redis-py). Quick lookups; blocks the event
+                        loop if called from async code.
+  - get_async_redis() : asyncio client, over a lazily-created class-level pool
+                        shared by every instance. Preferred everywhere new.
+
+Both use `decode_responses=True` (values come back as `str`; callers
+`json.loads` / `int()` as needed), `retry_on_timeout`, and a 30s health check.
+
+NOTE: get_redis() never actually caches - `pool_instance` stays None, so it
+builds a fresh ConnectionPool on every call. Only the async side is pooled.
+"""
 
 import os
 import redis
@@ -18,6 +34,7 @@ class RedisConnection:
 
 
     def get_redis(self):
+        # NOTE: pool_instance is never assigned, so this branch always runs.
         if self.pool_instance is None:
             redis_pool = redis.ConnectionPool( host=REDIS_HOST,
                 port=6379,

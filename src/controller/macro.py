@@ -824,6 +824,6 @@ class MacroController:
         except Exception as e:
             logging.error(f"Error getting all the country timeseries {e}", exc_info=True)
             raise
-if __name__ == "__main__":
-    test = MacroController()
-    print(asyncio.run(test.get_country_stats_timeseries("USA")))
+# if __name__ == "__main__":
+#     test = MacroController()
+#     print(asyncio.run(test.get_country_stats_timeseries("USA")))

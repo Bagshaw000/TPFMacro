@@ -1,3 +1,15 @@
+"""Twitter/X economic-sentiment scraping (Scweet) - EXPERIMENTAL, not wired in.
+
+Idea: per country, scrape recent high-engagement tweets about the economy
+(verified / blue-verified, min likes+retweets), run VADER over the combined
+text, and store a sentiment score alongside the news-based one. The store step
+(`extract_sentiment`'s "store in redis and database") is not implemented, and
+no route or worker job calls `active_sentiment`.
+
+Depends on a valid X auth token + outbound proxy (both from Doppler). Scraping
+X is brittle and against its ToS - treat this as a spike, not production.
+"""
+
 from datetime import datetime
 import sys
 import os
@@ -19,8 +31,10 @@ country=["US","CA","JP","DE","UK","AU","IN","CN","KR","BR","FR"]
 
 
 class TwitterController:
-    
+
     def __init__(self):
+        # Scweet client: auth token + proxy from Doppler, local sqlite for its
+        # crawl state, 3-way concurrency with a 2s floor between requests.
         self.scweet = Scweet(auth_token=get_doppler_env().twitter_token, db_path="scweet_state.db",config=ScweetConfig(
         concurrency=3,
         proxy=get_doppler_env().twitter_proxy,

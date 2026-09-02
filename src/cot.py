@@ -1,3 +1,27 @@
+"""COT (Commitment of Traders) ingest - CFTC weekly reports -> Postgres.
+
+Pulls the CFTC's disaggregated / TFF futures reports via the `cot_reports`
+library, normalises the ~130 provider columns, maps each contract to a
+standardised (market, asset_name) pair, and upserts into Postgres `cot_ttf`.
+
+  - all_data / merge_all_data : one-off historical bootstrap (2006 + 2017-on),
+    writes CSVs under data/. Run by hand, not on a schedule.
+  - process_all_data          : load a bootstrap CSV, clean + map rows, bulk
+    insert (first-time table fill).
+  - update_cot                : the weekly path (worker cron `cot_update`).
+    Fetches this year's report, keeps only rows newer than what's stored,
+    upserts them and pushes them into Redis via COTController.insert_cot_redis.
+  - determine_market          : the messy bit - the provider's contract names
+    drift (aliases, mini/micro variants), so this maps the ones we track to a
+    canonical name + market bucket and drops everything else (excluded_pairs).
+  - clean_row_data            : per-field type coercion (dates, floats, trader
+    counts, "." -> None).
+
+`data/instr.json` is the allow-list of tracked instruments, grouped by market.
+The class is `COT` (the trailing commented-out lines still reference an old
+`COTNew` name from before a rename).
+"""
+
 import os
 import sys
 # cot.py sits directly in src/, so src/ is what goes on the path for the bare
@@ -20,8 +44,9 @@ from datetime import datetime, date
 import re
 
 class COT:
-    
+
     def __init__(self):
+        # COTController for the Redis write-back; CotModell for Postgres.
         self.cot_ctrl = COTController()
         self.cot_model = CotModell()
         
@@ -66,11 +91,28 @@ class COT:
         
     # Determine the asset market and standardized asset name
     async def determine_market(self, instrument:str, instrument_arr:list,data:dict):
-         
+        """Map a raw CFTC contract name to (market_bucket, canonical_name), or
+        (None, None) to drop it.
+
+        `instrument`     - the contract name, already split off the " - exchange" suffix.
+        `instrument_arr` - flat allow-list (all of data/instr.json's values merged).
+        `data`           - {market_bucket: [names]} from data/instr.json.
+
+        Drops anything in `excluded_pairs` (mini/micro/duplicate variants we
+        don't track) or not in the allow-list. For the rest, finds which market
+        bucket it belongs to and normalises well-known aliases to one spelling
+        (e.g. 'NZ DOLLAR' / 'NEW ZEALAND DOLLAR' -> 'NEW ZEALAND DOLLAR').
+
+        NOTE: several of the Treasury `if a and a == b` guards below can never be
+        true (a single string can't equal two different literals) - those
+        branches are dead and the alias is never applied.
+        """
         try:
-            
-            asset_cls = None 
+
+            asset_cls = None
             asset_name = None
+            # Contract names we explicitly do NOT track - mini/micro/nano
+            # variants, consolidated duplicates, alt crypto, etc.
             excluded_pairs = ['RUSSEL 1000 MINI INDEX FUTURE',
                               'RUSSELL 1000 VALUE INDEX MINI',
                               'EMINI RUSSELL 1000 VALUE INDEX',
@@ -213,6 +255,13 @@ class COT:
         
         
     async def process_all_data(self):
+        """First-time table fill: read the bootstrap CSV (data/cot_all.csv),
+        rename columns via COT_COLUMN_MAPPING, map + clean each row, and bulk
+        insert the tracked ones.
+
+        NOTE: the final call passes `data` (the instr.json dict) to
+        insert_tff_report instead of `instrument_list` - a bug; nothing usable
+        is inserted as written."""
         try:
             with open('data/instr.json', 'r') as f:
                 data = json.load(f)
@@ -263,8 +312,14 @@ class COT:
             raise
         
     async def clean_row_data(self, row_dict: dict) -> dict:
+        """Per-field type coercion for one raw CFTC row:
+          - NaN / "." / missing            -> None
+          - report_date_as_yyyy_mm_dd      -> datetime (accepts 'YYYY-MM-DD' or 'M/D/Y h:m:s AM')
+          - change_in_* / traders_*        -> float (or None if unparseable)
+          - other strings                  -> stripped
+        """
         cleaned = {}
-        
+
         for key, value in row_dict.items():
             # Handle empty/missing values first
             if pd.isna(value) or value == '.':
@@ -317,13 +372,18 @@ class COT:
         return cleaned
     
     async def update_cot(self):
+        """Weekly catch-up (worker cron `cot_update`). Fetch this calendar
+        year's TFF report, and for every tracked contract whose latest row is
+        newer than what's already stored, upsert it into Postgres and push it
+        into Redis. A no-op until the table has been bootstrapped
+        (get_last_entry empty)."""
         try:
             last_entry = await  self.cot_model.get_last_entry()
-           
+
             if not last_entry:
-                return 
-            
-            # 2. Create lookup map
+                return
+
+            # 2. Latest stored report per instrument, for the "is this newer?" check.
             instrument_map = {e.market_and_exchange_names: e for e in last_entry}
             
             # 3. Load instruments

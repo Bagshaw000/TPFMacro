@@ -1,3 +1,20 @@
+"""Market data + economic-calendar helper, backed by yfinance and Redis.
+
+Despite living under model/, this is really a data-access layer over the
+yfinance API (quotes, history, screeners) plus a Redis cache. It has no
+Postgres table. Two broad groups of methods:
+
+  - Prices / analytics: get_currency, get_currency_ytd, get_symbol_data,
+    get_featured_pairs, get_equity_data, symbol_snapshot, symbol_correlation,
+    symbol_technical_signals (RSI / ATR / EMA computed inline).
+  - Economic events: get_economic_event -> store_event(_parallel) writes each
+    event as a Redis hash with a TTL from calculate_ttl(); get_news_events
+    reads them back. EconomicEventController wraps this side.
+
+`sem` bounds concurrent yfinance calls across all instances (yfinance is sync,
+so calls are run in a thread pool / threadpool executor).
+"""
+
 import asyncio
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
@@ -16,6 +33,7 @@ from database.redis_ import RedisConnection
 from config.config import get_doppler_env
 
 
+# Global cap on in-flight yfinance requests (shared by every MarketOverview).
 sem = asyncio.Semaphore(30)
 class MarketOverview:
     
@@ -26,8 +44,11 @@ class MarketOverview:
         
         
     async def get_currency(self):
+        """Refresh the `overview:currency:{PAIR}` Redis hashes for a fixed set
+        of ~40 FX pairs: full 1-year backfill (get_currency_ytd) for pairs not
+        yet cached, incremental top-up (get_currency_last_entry) for the rest."""
         try:
-            
+
             all_pairs = (
                 # Majors
                 'EURUSD=X', 'USDJPY=X', 'GBPUSD=X', 'USDCHF=X', 
@@ -84,6 +105,9 @@ class MarketOverview:
             logging.error(f"Error in currency pipeline {e}", exc_info=True)
     
     async def get_currency_ytd(self, ticker:str,pattern:str):
+        """Full 1-year daily OHLCV history for one pair from yfinance, written
+        as `{pattern}{ticker}` hash fields keyed by date. Concurrency-bounded by
+        the module `sem`."""
         try:
             async with sem:
                 
@@ -118,6 +142,8 @@ class MarketOverview:
             
             
     async def get_currency_last_entry(self,ticker:str, pattern:str):
+        """Incremental top-up: fetch only from the newest date already in the
+        pair's hash forward, and merge the new daily bars in."""
         try:
             async with sem:
             
@@ -154,6 +180,8 @@ class MarketOverview:
     
     
     async def get_symbol_data(self, ticker, category):
+        """The full cached OHLCV history for one instrument
+        (`overview:{category}:{ticker}` hash), sorted by date. `{}` if absent."""
         try:
             ticker_key = f"overview:{category}:{ticker}"
             
@@ -175,6 +203,8 @@ class MarketOverview:
             
             
     async def get_featured_pairs(self):
+        """Cached history for a small hard-coded "featured" set (EURUSD / GBPUSD
+        / USDCAD), one pipelined batch."""
         try:
             featured_pairs = {
                 "EURUSD":"currency",
@@ -198,6 +228,7 @@ class MarketOverview:
             
             
     async def get_equity_data(self):
+        """Unimplemented stub - intended to return cached equity-index data."""
         try:
             pass
             # Check if any equity is tored
@@ -207,6 +238,8 @@ class MarketOverview:
             logging.error("Error getting equity data", exc_info=True)
             
     async def get_economic_event(self, countries: str = "US, DE, GB, EU, HU, PL, CA, AU, NZ, JP, CH, SE, TR, NO, ZA, SG, MX"):
+        """Pull the next 7 days of the RapidAPI "ultimate economic calendar" for
+        `countries`, then hand the rows to store_event_parrallel for caching."""
         try:
             # self.redis.delete("news:US:*")
             # keys_to_delete = list(self.redis.scan_iter("news:US:*"))
@@ -259,8 +292,10 @@ class MarketOverview:
     
     
     async def store_event(self, country:str, events: list[dict] ):
+        """Write one country's events, each as `news:{country}:{id}` with the
+        per-event TTL set by store_event_parrallel (default 2 days)."""
         try:
-            # 
+            #
             if not events:
                 logging.info("No events to store")
                 return
@@ -282,10 +317,12 @@ class MarketOverview:
             logging.error("Error Storing single event",exc_info=True)
             
     async def store_event_parrallel(self, events: list[dict], countries:list)  :
+        """Compute a per-event TTL (calculate_ttl), group events by country, and
+        fan out store_event for each country concurrently."""
         try:
             if not events:
                 return
-            
+
             ttl_tasks = [self.calculate_ttl(e.get("date")) for e in events]
             ttls = await asyncio.gather(*ttl_tasks)
             
@@ -334,6 +371,7 @@ class MarketOverview:
         
         
     async def get_news_events(self, country):
+        """Read every cached `news:{country}:*` event back, as {key: raw_json}."""
         try:
             key = f"news:{country}:*"
            
@@ -365,6 +403,9 @@ class MarketOverview:
             logging.error(f"Error in get news event",exc_info=True)
 
     async def symbol_snapshot(self,ticker:str, category:str):
+        """One instrument's headline stats over its last ~252 trading days
+        (52-week high/low, latest close, range position, etc.) from the cached
+        OHLCV hash. Feeds GET /v1/symbol/snapshot/{category}/{ticker}."""
         try:
             # Add a semaphore
             #Ticker pattern
@@ -421,8 +462,11 @@ class MarketOverview:
 
     
     async def symbol_correlation(self, ticker:str,category:str):
+        """Correlate `ticker`'s daily close returns against every other
+        instrument in the same category, and return the most positively and
+        most negatively correlated names. Feeds GET /v1/symbol/corr/*."""
         try:
-            
+
             # Empty list of records
             records = []
 
@@ -511,6 +555,9 @@ class MarketOverview:
 
     
     async def symbol_technical_signals(self, ticker:str,category:str):
+        """Compute a small technical panel for one instrument from its cached
+        history - RSI(14), ATR, EMA(20) (all defined inline) - and a
+        summary signal. Feeds GET /v1/symbol/technical/*."""
         try:
             #Ticker pattern
             ticker_key = f"overview:{category}:{ticker}"

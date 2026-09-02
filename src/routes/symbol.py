@@ -1,3 +1,13 @@
+"""/v1/symbol routes - instrument quotes, snapshots and live streams.
+
+  - REST: /snapshot, /corr, /technical for one (category, ticker), backed by
+    MarketOverview (yfinance + Redis).
+  - WebSocket: /ws/{category}/{pair}, /event/{country}, /event - each accepts a
+    socket and pushes a fresh JSON payload every ~2s until the client leaves.
+  - Helpers new_event / get_symbol / ingest_symbol are SSE / yfinance-websocket
+    experiments, not mounted.
+"""
+
 import os
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))

@@ -1,3 +1,15 @@
+"""Per-country news-sentiment score, cached in Redis.
+
+Pipeline (per country):
+  get_news_article  -> last 24h of "economy" headlines from marketaux (3 max)
+  news_sentiment    -> VADER compound score per headline, averaged
+  store_sentiment   -> Redis `sentiment_news:{3-letter code}`, 4h TTL
+  all_country_sentiment -> runs the above for every entry in `country`
+
+MacroController reads `sentiment_news:*` back and folds it into the per-country
+macro payloads. The worker refreshes this every 3 hours (get_new_sentiment).
+"""
+
 import asyncio
 from datetime import datetime, timedelta
 import logging
@@ -14,13 +26,18 @@ import http.client, urllib.parse
 import json
 from custom_types.cpi import country_mapping, map_country_codes
 from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
+
+# Countries to score, in marketaux's 2-letter codes (mapped to 3-letter for
+# the Redis key). all_country_sentiment iterates this list.
 country=["US","CA","JP","DE","UK","AU","IN","CN","KR","BR","FR"]
 
 class NewsSentimentController:
-    
+
     def __init__(self):
-        
+
         self.secrets = get_doppler_env()
+        # NOTE: this holds the RedisConnection factory, not a client - methods
+        # call self.redis.get_async_redis() to get the actual client.
         self.redis = RedisConnection()
         
     async def get_news_article(self,country:str)->dict | None:
@@ -86,11 +103,13 @@ class NewsSentimentController:
                 return
             
             
+            # Average VADER "compound" score (-1 very negative .. +1 very
+            # positive) over the fetched headlines' descriptions.
             pol = 0
             for element in news["data"]:
                 pol_val = analyzer.polarity_scores(element['description'])
                 pol = pol + pol_val["compound"]
-                
+
             pol_score= pol/len(news["data"])
             
             senti = await self.store_sentiment(country, pol_score)

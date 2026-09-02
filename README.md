@@ -34,14 +34,21 @@ src/
     macro.py                global averages + economic-cycle calculator
     lse_.py                 LSE economic-calendar sync (CPI/PPI/UNEMP/retail/inflation)
     economic_event.py       yfinance economic-calendar events (Redis only)
-    news.py                 news-sentiment scoring (VADER)
+    news.py                 news-sentiment scoring (VADER over marketaux headlines)
+    twitter.py              X/Twitter sentiment scraping — experimental, not wired in
     llm.py                  LLMController — prompt builders over a shared httpx client
   model/                    Postgres accessors (SQLModel queries)
+    cot.py                  cot_ttf / cot_last_entry reads + writes
+    lse.py                  LSE indicator tables — upsert on (country_code, period)
+    market_overview.py      yfinance data-access + economic-event Redis cache
   custom_types/             SQLModel table definitions + pydantic config types
   database/
-    db.py                   async engine / session_scope
+    db.py                   async engine / session_scope / Supabase client
     redis_.py               RedisConnection — sync + async pooled clients
   config/config.py          get_doppler_env() — Doppler-backed secrets
+  nat.py                    NATS JetStream scaffolding — experimental, not wired in
+  routes/subscribers.py     NATS subscriber stub (currently broken import)
+  websocket_connection.py   in-memory per-user socket registry — unused
 sql/
   add_period_column.sql     migration: LSE tables keyed on (country_code, period)
 Dockerfile                  builder + runtime image (Doppler CLI baked in)
@@ -295,3 +302,71 @@ CFTC weekly report
   stubs.
 - Method / field name typos are load-bearing (`instituitional_pos`,
   `new_covert_redis_dataframe`, `asset_mgr_Net`).
+
+---
+
+## Roadmap / future implementations
+
+### Correctness & cleanup (do first)
+
+- **`cot_reports` ingest bugs** — `src/cot.py::process_all_data` passes the
+  wrong variable to `insert_tff_report` (nothing is inserted); several
+  `determine_market` alias branches use `a and a == b` and can never fire.
+- **`insert_cot_redis` double-write** — iterate the batch slice, not the whole
+  frame.
+- **`setup_redis` dead guard** — compare `cot_status` against `"1"` (string),
+  not `1`.
+- **Move the legacy pct-change path onto `self.aioredis`** — `get_cot_data`,
+  `new_calculate_all_change`, `setup_redis` still block the event loop on the
+  sync client. Then drop `self.redis` entirely.
+- **Finish or delete the stubs** — `interpret_pct_change` (LLM explanation of
+  pct change, cached at `cot_expl:*`), `cot_asset_position`, `get_asset_year`.
+- **Fix the `cross_section` label swap** — `assign_quadrants` returns
+  "Overheating"/"Goldilocks" transposed; the LLM prompts currently work around
+  it by reading raw `price`/`demand` numbers.
+- **Rename the typo'd identifiers** in one sweep (`instituitional_pos` →
+  `institutional_pos`, `new_covert_redis_dataframe` → `fetch_redis_frames`,
+  the `asset_mgr_Net` column).
+
+### Features
+
+- **Expose the full positioning snapshot** — a `/v1/cot/cot_pos?scope=all`
+  route over `get_positioning("all")` (the controller already supports it).
+- **Lazy tail summaries** — instead of the weekly `full_positioning` LLM sweep
+  (hundreds of rate-limited calls), generate an instrument's `summary` on first
+  read and cache it.
+- **Per-instrument positioning history** — persist each weekly
+  `_positioning_metrics` run (not just the latest), so `percentile` / `z` can
+  be charted over time, and widen `window` to 156 weeks (3y) for true extremes.
+- **Wire `instituitional_pos` divergence alerts** — flag when `asset_mgr` and
+  `lev_money` labels point opposite ways (e.g. "crowded long" vs "crowded
+  short") for a tracked instrument.
+- **Twitter/X sentiment** (`controller/twitter.py`) — finish the store step,
+  blend with the news score, add a worker cron. Currently a spike.
+- **`other_rept` / aggregate groups** in `net_pct_oi_timeseries` — it covers
+  `asset_mgr` / `lev_money` / `dealer`; `asset_group_changes` already does all
+  four TFF buckets.
+- **GDP / unemployment controllers** — `controller/gdp.py`, `unemp.py`,
+  `cpi.py`, `ppi.py` are commented-out scaffolds; the live path is `lse_.py`.
+  Consolidate or remove.
+
+### Infrastructure
+
+- **NATS message bus** (`src/nat.py`, `routes/subscribers.py`) — replace
+  "worker writes Redis, API polls Redis" with publish/subscribe on subjects
+  (`cpi.new`, `cot.updated`, `symbol.ingested`). The `nats` service is already
+  in `docker-compose`. Fix the broken import in `routes/subscribers.py` first.
+- **In-process scheduling fallback** — if the deployment runs only the API,
+  use `fastapi_utilities.repeat_every` in `lifespan` for the light jobs
+  (`ensure_positioning`, sentiment) so the caches don't go stale without a
+  separate worker.
+- **Shared WebSocket registry** — `websocket_connection.py::ConnectionManager`
+  exists but the streaming routes in `routes/symbol.py` each manage sockets
+  inline; unify them and support targeted (per-user) pushes.
+- **Health check** — `GET /health` always returns `ok`; make it actually ping
+  Redis and the DB (the docker-compose healthcheck is commented out).
+- **Reflected tables → SQLModel** — `cot_ttf` / `cot_last_entry` are reflected
+  at runtime by `init_db_schemas()`; declaring them as SQLModel classes would
+  give typing and drop the startup reflection step.
+- **Alembic migrations** — `alembic` is installed but unused; the one migration
+  is a hand-run `.sql` file. Adopt Alembic for the next schema change.

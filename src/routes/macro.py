@@ -1,3 +1,10 @@
+"""/v1/macro routes - cross-indicator reads and the Phillips-curve cross-section.
+
+Thin handlers: call MacroController / CrossSectionController (which read from
+Redis, populated by the worker) and wrap the result - 200 with the payload, or
+500 with null when the cache is cold / a producer hasn't run.
+"""
+
 import os
 import sys
 
@@ -9,6 +16,7 @@ from controller.cross_section import CrossSectionController
 
 
 router = APIRouter(prefix="/v1/macro")
+# Process-lifetime singletons.
 macro_ctrl = MacroController()
 cross_section_ctrl = CrossSectionController()
 

@@ -1,6 +1,8 @@
-# COT (Commitment of Traders) API routes. All controller work lives in
-# controller/cot.py; these handlers just call it and wrap the result in a
-# JSONResponse (200 with the payload, or an error status with null).
+"""/v1/cot routes - COT (Commitment of Traders) positioning + net-position change.
+
+All work lives in controller/cot.py; these handlers just call it and wrap the
+result in a JSONResponse (200 with the payload, or an error status with null).
+"""
 
 import os
 import sys

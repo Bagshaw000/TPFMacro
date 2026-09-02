@@ -1,9 +1,21 @@
+"""In-memory WebSocket connection registry.
+
+Tracks live sockets per user so the server can push to one user
+(`send_personal_message`) or everyone (`broadcast`). One user may have several
+open sockets (multiple tabs / devices), hence the set per user id. State lives
+only in this process - it is not shared across Uvicorn workers or replicas.
+
+Not currently instantiated anywhere; the streaming routes in routes/symbol.py
+manage their own sockets inline. Kept for when fan-out to named users is needed.
+"""
+
 from typing import Dict, Set
 from fastapi import WebSocket
 
 
 class ConnectionManager:
     def __init__(self):
+        # user_id -> set of that user's currently-open sockets.
         self.active_connections: Dict[str, Set[WebSocket]] = {}
 
     async def connect(self, websocket: WebSocket, user_id:str):

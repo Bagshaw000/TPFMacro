@@ -1,3 +1,18 @@
+"""Postgres accessor for the LSE economic-indicator tables (cpi / ppi / unemp /
+inflation / retail).
+
+`LSEModel` is called by controller/lse_.py:
+  - get_last_report        : newest stored row per country, per table (drives the
+                             catch-up vs full-backfill decision)
+  - insert_event           : idempotent bulk upsert, keyed on
+                             (country_code, period) - a flash / final / revision
+                             for the same reference month all hit one row, and
+                             the newest report_date wins on conflict.
+  - get_monthly_series etc.: history reads for MacroController's trailing stats.
+
+See sql/add_period_column.sql for why the key is (country_code, period).
+"""
+
 import asyncio
 import logging
 import os
@@ -21,6 +36,9 @@ _CONFLICT_COLUMNS = ("country_code", "period")
 class LSEModel:
     
     async def get_last_report(self, table:str):
+        """The most recent stored reading per country for one indicator, from
+        the `{table}_recent` DB view. controller/lse_.py uses this to decide,
+        per country, whether it needs a catch-up fetch or a full backfill."""
         try:
             async with session_scope() as session:
                 table_name = table+"_recent"
@@ -142,6 +160,13 @@ class LSEModel:
             raise
 
     async def insert_event(self, data: List[_EconIndicatorWithForecast]) -> List[_EconIndicatorWithForecast]:
+        """Bulk upsert one indicator's rows, keyed on (country_code, period).
+
+        Two-stage dedup: within the incoming batch keep the newest report_date
+        per (country, month), then `ON CONFLICT DO UPDATE ... WHERE incoming
+        report_date >= stored` so a late-arriving older publication can't
+        overwrite a newer revision. All rows must be the same table class.
+        """
         try:
             if not data:
                 return []

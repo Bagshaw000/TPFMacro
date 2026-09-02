@@ -1,3 +1,18 @@
+"""Postgres accessor for the COT (Commitment of Traders) tables.
+
+`CotModell` is the only place raw SQL against `cot_ttf` / `cot_last_entry`
+lives. The COT ingest (src/cot.py) writes through `insert_tff_report` /
+`update_ttf_report`; the analytics side (controller/cot.py) reads through the
+`get_*` methods:
+
+  - get_last_report / get_last_entry  : newest stored row(s), for catch-up sync
+  - get_all_last_year_cot             : ~60 weeks per instrument (Redis warm-up)
+  - get_symbol_last_year_cot          : ~1 year for one instrument
+  - get_distinct_instruments          : every (market, name) pair - the universe
+
+Every method runs inside `session_scope()` (auto commit / rollback).
+"""
+
 import asyncio
 from datetime import datetime
 import logging
@@ -10,15 +25,15 @@ from database.db import db_connect, init_db_schemas, session_scope, cot_ttf_tabl
 from sqlmodel import DateTime, String, Table, cast, col, func, insert, select, text
 
 
-         
- # Get the all cot Data for all Instruments
-            
+# Reads and writes for every COT instrument.
 class CotModell:
-    # global cot_last_entry 
+    # global cot_last_entry
    
    
     
     async def get_last_report(self)->CotData | None :
+        """The single most recent row across the whole table (max report_date),
+        or None if empty."""
         try:
             async with session_scope() as session:
             
@@ -37,6 +52,8 @@ class CotModell:
             raise
         
     async def insert_tff_report(self, data:List[CotData]):
+        """Plain bulk insert (no conflict handling) - for the first-time table
+        fill. Refreshes each row so callers see the generated ids."""
         try:
             async with session_scope() as session:
                 async with session.begin():
@@ -54,6 +71,8 @@ class CotModell:
     
     
     async def get_latest_cot_data(self, start:int, end:int)-> List[CotData]:
+        """Newest-first page of rows: `offset(start).limit(end)`. NOTE `end` is
+        used as the page size, not an absolute end index."""
         try:
             async with session_scope() as session:
                 async with session.begin():
@@ -68,6 +87,7 @@ class CotModell:
         
         
     async def get_cot_data_size(self)->int | None:
+        """Total row count in `cot_ttf`."""
         try:
             async with session_scope() as session:
                 async with session.begin():
@@ -86,8 +106,12 @@ class CotModell:
         
         
     async def update_ttf_report(self,data:List[CotData]):
+        """Upsert by (market_and_exchange_names, report_date): update the row's
+        columns in place if it exists (except id / created_at), else insert.
+        Returns a {status, inserted, updated, total} summary. Does one SELECT
+        per row - fine for the weekly delta, not for a bulk load."""
         try:
-            
+
             async with session_scope() as session:
                 inserted_count = 0
                 updated_count = 0
@@ -133,10 +157,13 @@ class CotModell:
             raise
         
     async def get_last_entry(self)->List[CotData] :
+        """One row per instrument - the latest stored report for each - from the
+        `cot_last_entry` DB view. `update_cot` uses this to decide which
+        contracts have a newer weekly report to pull."""
         try:
-            
+
             async with session_scope() as session:
-                          
+
                 query = text("""SELECT *, TO_CHAR(report_date_as_yyyy_mm_dd, 'YYYY-MM-DD') as report_date_as_yyyy_mm_dd   FROM cot_last_entry""")
                 
                 result = await session.exec(query)
@@ -156,6 +183,7 @@ class CotModell:
         
         
     async def get_symbol_last_year_cot(self, asset_name)-> List[CotData]:
+        """The last 53 weekly reports (~1 year) for one instrument, newest-first."""
         try:
             async with session_scope() as session:
                 async with session.begin():
@@ -169,10 +197,13 @@ class CotModell:
             raise
         
     async def get_all_last_year_cot(self)->List[CotData]:
+        """The last 60 weekly reports for EVERY instrument in one query (a
+        LATERAL join per distinct name). This is what COTController.setup_redis
+        / get_cot_data use to warm the `cot_ttf:*` Redis hashes from cold."""
         try:
             async with session_scope() as session:
                 async with session.begin():
-                    query = text("""SELECT 
+                    query = text("""SELECT
                             symbols.market_and_exchange_names,
                             latest_60.*
                         FROM (
