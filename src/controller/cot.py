@@ -496,6 +496,20 @@ class COTController:
         "dealer":    ("dealer_positions_long_all",    "dealer_positions_short_all"),
     }
 
+    # Every TFF trader group, as (long_field, short_field, net_field). Net is
+    # long - short where the legs are in the Redis hash; `other_rept` only has
+    # the pre-computed net column (see insert_cot_redis's column select), so its
+    # legs are None and the net_field is used instead.
+    _GROUP_LEGS = {
+        "dealer":     ("dealer_positions_long_all",    "dealer_positions_short_all",    "dealer_net"),
+        "asset_mgr":  ("asset_mgr_positions_long_all", "asset_mgr_positions_short_all", "asset_mgr_net"),
+        "lev_money":  ("lev_money_positions_long_all", "lev_money_positions_short_all", "lev_money_net"),
+        "other_rept": (None,                            None,                            "other_rept_net"),
+    }
+
+    # Trailing pct-change windows, counted in weekly COT reports (~4.33 wk/mo).
+    _CHANGE_WINDOWS = {"1_month": 4, "3_month": 13, "6_month": 26, "1_year": 52}
+
     @staticmethod
     def _crowding_label(percentile: float) -> str | None:
         """Bucket a 0-100 positioning percentile into a crowding label.
@@ -816,6 +830,107 @@ class COTController:
             logging.error(f"Error building net %OI time series: {e}", exc_info=True)
             raise
 
+    async def asset_group_changes(self, asset: str, market: str | None = None,
+                                  weeks: int = 52) -> dict:
+        """Last `weeks` weekly COT reports for ONE instrument, with every TFF
+        trader group's net-position series and its pct change over 1 / 3 / 6 /
+        12-month trailing windows.
+
+        `market` is the {market} key segment (e.g. "Currency"); when omitted it
+        is looked up from Postgres by the instrument name.
+
+        Returns:
+            {
+              "asset": "EURO FX", "market": "Currency",
+              "weeks": 52, "as_of": "2025-08-26",
+              "groups": {
+                "dealer": {
+                  "net": [["2024-09-03", -30120.0], ..., ["2025-08-26", -32050.0]],
+                  "pct_change": {"1_month": 6.7, "3_month": -12.4,
+                                 "6_month": 40.1, "1_year": 5.3}
+                },
+                "asset_mgr": {...}, "lev_money": {...}, "other_rept": {...}
+              }
+            }
+            {} if the instrument has no cached hashes / isn't in cot_ttf.
+
+        net       = long - short (or the pre-computed *_net column for
+                    other_rept), forward-filled across any missing weekly report.
+        pct_change = (latest - value `w` weeks back) / abs(that value) * 100.
+                    A window longer than the history, or a zero base, gives None.
+        """
+        try:
+            # Resolve the market label if the caller only knows the name.
+            if market is None:
+                market = next(
+                    (m for m, n in await self.cot.get_distinct_instruments() if n == asset),
+                    None,
+                )
+                if market is None:
+                    logging.info(f"{asset} not found in cot_ttf")
+                    return {}
+
+            # {report_date: hash} for the newest `weeks` reports, oldest-first.
+            _, by_date = await self._fetch_recent_weeks(market, asset, weeks)
+            if not by_date:
+                logging.info(f"No cached COT hashes for {market}:{asset}")
+                return {}
+
+            # One row per weekly report; coerce + sort ascending by date.
+            df = pd.DataFrame([{"date": d, **h} for d, h in by_date.items()])
+            df["date"] = pd.to_datetime(df["date"], errors="coerce")
+            df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+            if df.empty:
+                return {}
+            dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
+
+            groups: dict = {}
+            for group, (long_f, short_f, net_f) in self._GROUP_LEGS.items():
+                # Prefer long - short; fall back to the stored net column.
+                if long_f in df.columns and short_f in df.columns:
+                    net = (pd.to_numeric(df[long_f], errors="coerce")
+                           - pd.to_numeric(df[short_f], errors="coerce"))
+                elif net_f in df.columns:
+                    net = pd.to_numeric(df[net_f], errors="coerce")
+                else:
+                    continue                       # group absent from the hash
+
+                # Forward-fill so one missing weekly report doesn't punch a hole
+                # in the series or throw off the pct-change look-backs.
+                net = net.ffill()
+
+                series = [
+                    [d, None if pd.isna(v) else round(float(v), 2)]
+                    for d, v in zip(dates, net)
+                ]
+
+                # pct change of the latest value vs the value `w` reports earlier.
+                latest = net.iloc[-1]
+                pct_change: dict = {}
+                for name, w in self._CHANGE_WINDOWS.items():
+                    idx = len(net) - 1 - w
+                    if idx < 0 or pd.isna(latest):
+                        pct_change[name] = None    # not enough history
+                        continue
+                    base = net.iloc[idx]
+                    pct_change[name] = (
+                        None if pd.isna(base) or base == 0
+                        else round((latest - base) / abs(base) * 100, 2)
+                    )
+
+                groups[group] = {"net": series, "pct_change": pct_change}
+
+            return {
+                "asset": asset,
+                "market": market,
+                "weeks": weeks,
+                "as_of": dates[-1],
+                "groups": groups,
+            }
+        except Exception as e:
+            logging.error(f"Error computing asset group changes for {asset}: {e}", exc_info=True)
+            raise
+
     async def instituitional_pos(self):
         """Institutional (asset-manager) positioning per instrument, plus
         leveraged-money and dealer positioning for context, for the curated
@@ -1074,4 +1189,4 @@ class COTController:
             raise
 if __name__ == "__main__":
     test = COTController()
-    print(asyncio.run(test.net_pct_oi_timeseries()))
+    print(asyncio.run(test.asset_group_changes("EURO FX")))

@@ -171,18 +171,18 @@ class WorkerSettings:
         # monthly cadence is plenty, well ahead of LEAD_TTL's 40-day expiry.
         cron(refresh_cross_section, day={1, 10, 15, 20, 25}, hour=22, minute=30, unique=True,
             run_at_startup=False),
-        # Every Thursday at 01:00 - the day after cot_update, so the long-tail
-        # positioning (full_positioning: every non-curated cot_ttf instrument,
-        # with an LLM breakdown each) is scored against the freshly synced
-        # weekly reports. Slow (hundreds of rate-limited LLM calls); runs
+        # Every Sunday at 01:00 - a few days after cot_update has synced the new
+        # weekly report, so the long-tail positioning (full_positioning: every
+        # non-curated cot_ttf instrument, with an LLM breakdown each) is scored
+        # against fresh data. Slow (hundreds of rate-limited LLM calls); runs
         # overnight. Writes cot_pos:_meta_all; never touches cot_pos:_meta.
         cron(full_cot_positioning, weekday="sun", hour=1, unique=True,
             run_at_startup=False),
-        # Every Thursday at 00:30 - also the day after cot_update, and ahead of
-        # the full sweep above. Rescore the curated COT_CURATED_ASSETS shortlist
-        # and rewrite cot_pos:_meta + its blobs (each with an LLM summary). Only
-        # ~11 instruments, so this is quick. This is the job that keeps the
-        # startup snapshot (ensure_positioning) fresh while the app runs.
+        # Every Saturday at 00:30 - ahead of the full sweep above. Rescores the
+        # curated COT_CURATED_ASSETS shortlist and rewrites cot_pos:_meta + its
+        # blobs (each with an LLM summary). Only ~11 instruments, so this is
+        # quick. This is the job that keeps the startup snapshot
+        # (ensure_positioning) fresh while the app runs.
         cron(curated_cot_positioning, weekday="sat", hour=0, minute=30, unique=True,
             run_at_startup=False),
     ]
