@@ -25,7 +25,7 @@ def configure_logging(level: int = logging.INFO) -> None:
     the worker calls this from `on_startup` (after arq configures its own)."""
     handlers: list[logging.Handler] = [logging.StreamHandler()]
 
-    log_file = os.getenv("LOG_FILE", "logs/app.log")
+    log_file = os.getenv("LOG_FILE", "logs/app.logs")
     try:
         os.makedirs(os.path.dirname(log_file) or ".", exist_ok=True)
         handlers.append(logging.FileHandler(log_file))
