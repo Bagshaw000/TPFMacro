@@ -1,0 +1,151 @@
+2026-09-02 23:08:26,635 [INFO] uvicorn.error: Started server process [39328]
+2026-09-02 23:08:26,636 [INFO] uvicorn.error: Waiting for application startup.
+2026-09-02 23:08:29,327 [ERROR] src.controller.cot: Error setting up redis: Error 11001 connecting to redis:6379. getaddrinfo failed.
+Traceback (most recent call last):
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 290, in connect
+    await self.retry.call_with_retry(
+        lambda: self._connect(), lambda error: self.disconnect()
+    )
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\retry.py", line 59, in call_with_retry
+    return await do()
+           ^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 723, in _connect
+    reader, writer = await asyncio.open_connection(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **self._connection_arguments()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\streams.py", line 48, in open_connection
+    transport, _ = await loop.create_connection(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda: protocol, host, port, **kwds)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\base_events.py", line 1122, in create_connection
+    infos = await self._ensure_resolved(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (host, port), family=family,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        type=socket.SOCK_STREAM, proto=proto, flags=flags, loop=self)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\base_events.py", line 1508, in _ensure_resolved
+    return await loop.getaddrinfo(host, port, family=family, type=type,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                  proto=proto, flags=flags)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\base_events.py", line 939, in getaddrinfo
+    return await self.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        None, getaddr_func, host, port, family, type, proto, flags)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\DELL 5520\anaconda3\Lib\socket.py", line 977, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\src\controller\cot.py", line 399, in setup_redis
+    cot_status =  await  self.aioredis.get("cot_status")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\client.py", line 641, in execute_command
+    conn = self.connection or await pool.get_connection()
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 1100, in get_connection
+    await self.ensure_connection(connection)
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 1133, in ensure_connection
+    await connection.connect()
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 298, in connect
+    raise ConnectionError(self._error_message(e))
+redis.exceptions.ConnectionError: Error 11001 connecting to redis:6379. getaddrinfo failed.
+2026-09-02 23:08:29,394 [ERROR] uvicorn.error: Traceback (most recent call last):
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 290, in connect
+    await self.retry.call_with_retry(
+        lambda: self._connect(), lambda error: self.disconnect()
+    )
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\retry.py", line 59, in call_with_retry
+    return await do()
+           ^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 723, in _connect
+    reader, writer = await asyncio.open_connection(
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        **self._connection_arguments()
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+    )
+    ^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\streams.py", line 48, in open_connection
+    transport, _ = await loop.create_connection(
+                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        lambda: protocol, host, port, **kwds)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\base_events.py", line 1122, in create_connection
+    infos = await self._ensure_resolved(
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        (host, port), family=family,
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        type=socket.SOCK_STREAM, proto=proto, flags=flags, loop=self)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\base_events.py", line 1508, in _ensure_resolved
+    return await loop.getaddrinfo(host, port, family=family, type=type,
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+                                  proto=proto, flags=flags)
+                                  ^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\asyncio\base_events.py", line 939, in getaddrinfo
+    return await self.run_in_executor(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+        None, getaddr_func, host, port, family, type, proto, flags)
+        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\concurrent\futures\thread.py", line 59, in run
+    result = self.fn(*self.args, **self.kwargs)
+  File "C:\Users\DELL 5520\anaconda3\Lib\socket.py", line 977, in getaddrinfo
+    for res in _socket.getaddrinfo(host, port, family, type, proto, flags):
+               ~~~~~~~~~~~~~~~~~~~^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+socket.gaierror: [Errno 11001] getaddrinfo failed
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\starlette\routing.py", line 694, in lifespan
+    async with self.lifespan_context(app) as maybe_state:
+               ~~~~~~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\fastapi\routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\fastapi\routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\fastapi\routing.py", line 216, in merged_lifespan
+    async with original_context(app) as maybe_original_state:
+               ~~~~~~~~~~~~~~~~^^^^^
+  File "C:\Users\DELL 5520\anaconda3\Lib\contextlib.py", line 214, in __aenter__
+    return await anext(self.gen)
+           ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\main.py", line 51, in lifespan
+    await cot_ctrl.setup_redis()
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\src\controller\cot.py", line 399, in setup_redis
+    cot_status =  await  self.aioredis.get("cot_status")
+                  ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\client.py", line 641, in execute_command
+    conn = self.connection or await pool.get_connection()
+                              ^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 1100, in get_connection
+    await self.ensure_connection(connection)
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 1133, in ensure_connection
+    await connection.connect()
+  File "C:\Users\DELL 5520\Documents\GitHub\TPFMacro\.venv\Lib\site-packages\redis\asyncio\connection.py", line 298, in connect
+    raise ConnectionError(self._error_message(e))
+redis.exceptions.ConnectionError: Error 11001 connecting to redis:6379. getaddrinfo failed.
+
+2026-09-02 23:08:29,415 [ERROR] uvicorn.error: Application startup failed. Exiting.

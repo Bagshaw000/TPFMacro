@@ -14,7 +14,7 @@ services:
     ports:
       - "8000:8000"
     volumes:
-      - ./logs:/app/logs 
+      - ./logs:/app/log
       
     environment:
       - DOPPLER_TOKEN=${DOPPLER_TOKEN}
