@@ -150,6 +150,13 @@ class LSEController:
 
             get_recent = await asyncio.gather(*tasks)
 
+            # Warm the Redis cache straight from Postgres's current state on
+            # every run, reusing the reports just fetched. The branches below
+            # only write Redis for event types that had a brand-new release,
+            # so without this a flushed / cold Redis (or a fresh deploy) would
+            # serve nothing from /v1/macro until the next release lands.
+            await self.rebuild_redis(get_recent)
+
             # get_last_report returns (table_name, rows). Split into event
             # types that have existing data (cal_tasks) vs none yet
             # (empty_cal_tasks), since each needs a different fetch strategy
@@ -391,7 +398,41 @@ class LSEController:
             logger.error(f"Error processing event: {e}", exc_info=True)
             raise
 
-    async def insert_redis(self, data: List[_EconIndicatorWithForecast]):
+    async def rebuild_redis(self, reports=None):
+        """Unconditionally repopulate the Redis cache for every tracked event
+        type straight from Postgres: `{table}:{country}` (latest reading per
+        country, from the `{table}_recent` view) and `{table}:avg`.
+
+        This is the LSE-side equivalent of MacroController.refresh_factor_stats
+        - idempotent, cheap, safe to run on every startup / cron, and the thing
+        that makes the cache survive a Redis flush without waiting for the next
+        release. get_event_cal calls it with the reports it already fetched;
+        callers elsewhere can invoke it with no argument.
+
+        `reports` is an optional pre-fetched list of (table, rows) tuples as
+        returned by LSEModel.get_last_report.
+        """
+        try:
+            if reports is None:
+                reports = await asyncio.gather(
+                    *(self.lse.get_last_report(evt) for evt in events_)
+                )
+
+            results = await asyncio.gather(
+                *(self.insert_redis(rows, table=table)
+                  for table, rows in reports if rows),
+                return_exceptions=True,
+            )
+            for result in results:
+                if isinstance(result, Exception):
+                    logger.error("rebuild_redis: one table failed: %s", result,
+                                 exc_info=result)
+        except Exception as e:
+            logger.error(f"Error rebuilding LSE redis cache: {e}", exc_info=True)
+            raise
+
+    async def insert_redis(self, data: List[_EconIndicatorWithForecast],
+                           table: str | None = None):
         """Refresh this event type's Redis cache from `data` plus whatever
         is already stored, and return the cross-country average.
 
@@ -409,6 +450,10 @@ class LSEController:
           latest known reading, and "up to date" excludes any country still
           stuck on an older month so a stale country can't drag the average
           down (or skew it) alongside genuinely current ones.
+
+        `table` overrides the key prefix. Pass it when `data` is validated as
+        the generic `LSEType` (whose __tablename__ is "lse", not the real
+        table) - e.g. from rebuild_redis / get_last_report.
         """
         try:
             if not data:
@@ -416,8 +461,9 @@ class LSEController:
 
             # Each record's own concrete class already knows its table name
             # (e.g. "unemp", "cpi") - use that directly as the redis key
-            # prefix instead of re-deriving it from a lookup table.
-            key = data[0].__class__.__tablename__
+            # prefix instead of re-deriving it from a lookup table, unless the
+            # caller passed an explicit `table` (see docstring).
+            key = table or data[0].__class__.__tablename__
 
             # Sort so that, per country, the newest report_date comes first
             # (used below by setdefault to keep only the latest per country).

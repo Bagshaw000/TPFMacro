@@ -594,7 +594,7 @@ class MacroController:
 
             # macro_list.remove("gdp")
 
-            avg_dict = defaultdict()
+            avg_dict: dict = {}
             pipeline = self.redis.pipeline()
 
             # get the global avg
@@ -603,19 +603,16 @@ class MacroController:
             for ele in events_:
                 pipeline.get(f"{str(ele)}:avg")
 
-            result= await pipeline.execute()
+            result = await pipeline.execute()
 
-
-            # BUG: `round(float(value), 4) or None` - if the rounded average
-            # is exactly 0.0, `0.0 or None` evaluates to None (0.0 is
-            # falsy), silently turning a genuine zero average into a
-            # missing value. Also, if `value` is None (no `{macro}:avg` key
-            # cached yet for this indicator), `float(None)` raises
-            # TypeError, uncaught here (it would propagate up as a raw
-            # exception via the `except` block below instead of yielding
-            # a clean per-key None like the other methods in this file do).
+            # `result` has one slot per indicator: a JSON string ("2.31"),
+            # the literal "null" (insert_redis stores json.dumps(None) when no
+            # country was up to date), or None (the `{macro}:avg` key has never
+            # been written). Parse each independently and map the "no value"
+            # cases to a clean None rather than letting float() raise.
             for value, macro in zip(result, events_):
-                avg_dict[macro] = round(float(value),4) or None
+                parsed = json.loads(value) if value is not None else None
+                avg_dict[macro] = round(float(parsed), 4) if parsed is not None else None
 
             return avg_dict
 

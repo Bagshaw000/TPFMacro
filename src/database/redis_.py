@@ -23,7 +23,7 @@ import redis.asyncio as aioredis
 # unchanged inside docker; set REDIS_HOST=localhost in the environment when
 # running outside docker (e.g. a local Redis, or `docker compose` with the
 # redis port published to the host).
-REDIS_HOST = os.getenv("REDIS_HOST", "redis")
+REDIS_HOST = os.getenv("REDIS_HOST", "localhost")
 
 
 class RedisConnection:
