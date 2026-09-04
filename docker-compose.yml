@@ -15,9 +15,14 @@ services:
       - "8000:8000"
     volumes:
       - ./logs:/app/log
-      
+
     environment:
       - DOPPLER_TOKEN=${DOPPLER_TOKEN}
+      # Redis is a separate container on the compose network, not localhost.
+      - REDIS_HOST=redis
+      # Opt-in file logging. This path is inside the ./logs:/app/log mount and
+      # OUTSIDE the app source, so it never triggers a --reload loop.
+      - LOG_FILE=/app/log/app.log
 
     depends_on:
       redis:
@@ -74,9 +79,12 @@ services:
       dockerfile: Dockerfile
     command: arq src.worker.WorkerSettings
     container_name: worker
+    volumes:
+      - ./logs:/app/log
     environment:
       - DOPPLER_TOKEN=${DOPPLER_TOKEN}
-      
+      - REDIS_HOST=redis
+      - LOG_FILE=/app/log/worker.log
 
     depends_on:
       redis:

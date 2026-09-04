@@ -785,6 +785,73 @@ class COTController:
             logger.error(f"Error building net %OI time series: {e}", exc_info=True)
             raise
 
+    async def _resolve_market(self, asset: str) -> str | None:
+        """Look up an instrument's `market` key-segment (e.g. "Currency") from
+        Postgres by name. None if the instrument isn't in cot_ttf at all."""
+        return next(
+            (m for m, n in await self.cot.get_distinct_instruments() if n == asset),
+            None,
+        )
+
+    def _group_changes_history(self, by_date: dict) -> tuple[dict, str | None]:
+        """Shared by asset_group_changes and get_instrument: turn one
+        instrument's {report_date: hash} into every TFF trader group's
+        net-position series plus its pct change over 1/3/6/12-month windows.
+
+        Returns ({group: {"net": [...], "pct_change": {...}}}, last_date) -
+        ({}, None) if `by_date` yields no usable rows.
+
+        net        = long - short (or the pre-computed *_net column for
+                     other_rept), forward-filled across any missing weekly report.
+        pct_change = (latest - value `w` weeks back) / abs(that value) * 100.
+                     A window longer than the history, or a zero base, gives None.
+        """
+        # One row per weekly report; coerce + sort ascending by date.
+        df = pd.DataFrame([{"date": d, **h} for d, h in by_date.items()])
+        df["date"] = pd.to_datetime(df["date"], errors="coerce")
+        df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
+        if df.empty:
+            return {}, None
+        dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
+
+        groups: dict = {}
+        for group, (long_f, short_f, net_f) in self._GROUP_LEGS.items():
+            # Prefer long - short; fall back to the stored net column.
+            if long_f in df.columns and short_f in df.columns:
+                net = (pd.to_numeric(df[long_f], errors="coerce")
+                       - pd.to_numeric(df[short_f], errors="coerce"))
+            elif net_f in df.columns:
+                net = pd.to_numeric(df[net_f], errors="coerce")
+            else:
+                continue                       # group absent from the hash
+
+            # Forward-fill so one missing weekly report doesn't punch a hole
+            # in the series or throw off the pct-change look-backs.
+            net = net.ffill()
+
+            series = [
+                [d, None if pd.isna(v) else round(float(v), 2)]
+                for d, v in zip(dates, net)
+            ]
+
+            # pct change of the latest value vs the value `w` reports earlier.
+            latest = net.iloc[-1]
+            pct_change: dict = {}
+            for name, w in self._CHANGE_WINDOWS.items():
+                idx = len(net) - 1 - w
+                if idx < 0 or pd.isna(latest):
+                    pct_change[name] = None    # not enough history
+                    continue
+                base = net.iloc[idx]
+                pct_change[name] = (
+                    None if pd.isna(base) or base == 0
+                    else round((latest - base) / abs(base) * 100, 2)
+                )
+
+            groups[group] = {"net": series, "pct_change": pct_change}
+
+        return groups, dates[-1]
+
     async def asset_group_changes(self, asset: str, market: str | None = None,
                                   weeks: int = 52) -> dict:
         """Last `weeks` weekly COT reports for ONE instrument, with every TFF
@@ -808,19 +875,10 @@ class COTController:
               }
             }
             {} if the instrument has no cached hashes / isn't in cot_ttf.
-
-        net       = long - short (or the pre-computed *_net column for
-                    other_rept), forward-filled across any missing weekly report.
-        pct_change = (latest - value `w` weeks back) / abs(that value) * 100.
-                    A window longer than the history, or a zero base, gives None.
         """
         try:
-            # Resolve the market label if the caller only knows the name.
             if market is None:
-                market = next(
-                    (m for m, n in await self.cot.get_distinct_instruments() if n == asset),
-                    None,
-                )
+                market = await self._resolve_market(asset)
                 if market is None:
                     logger.info(f"{asset} not found in cot_ttf")
                     return {}
@@ -831,59 +889,98 @@ class COTController:
                 logger.info(f"No cached COT hashes for {market}:{asset}")
                 return {}
 
-            # One row per weekly report; coerce + sort ascending by date.
-            df = pd.DataFrame([{"date": d, **h} for d, h in by_date.items()])
-            df["date"] = pd.to_datetime(df["date"], errors="coerce")
-            df = df.dropna(subset=["date"]).sort_values("date").reset_index(drop=True)
-            if df.empty:
+            groups, as_of = self._group_changes_history(by_date)
+            if as_of is None:
                 return {}
-            dates = df["date"].dt.strftime("%Y-%m-%d").tolist()
-
-            groups: dict = {}
-            for group, (long_f, short_f, net_f) in self._GROUP_LEGS.items():
-                # Prefer long - short; fall back to the stored net column.
-                if long_f in df.columns and short_f in df.columns:
-                    net = (pd.to_numeric(df[long_f], errors="coerce")
-                           - pd.to_numeric(df[short_f], errors="coerce"))
-                elif net_f in df.columns:
-                    net = pd.to_numeric(df[net_f], errors="coerce")
-                else:
-                    continue                       # group absent from the hash
-
-                # Forward-fill so one missing weekly report doesn't punch a hole
-                # in the series or throw off the pct-change look-backs.
-                net = net.ffill()
-
-                series = [
-                    [d, None if pd.isna(v) else round(float(v), 2)]
-                    for d, v in zip(dates, net)
-                ]
-
-                # pct change of the latest value vs the value `w` reports earlier.
-                latest = net.iloc[-1]
-                pct_change: dict = {}
-                for name, w in self._CHANGE_WINDOWS.items():
-                    idx = len(net) - 1 - w
-                    if idx < 0 or pd.isna(latest):
-                        pct_change[name] = None    # not enough history
-                        continue
-                    base = net.iloc[idx]
-                    pct_change[name] = (
-                        None if pd.isna(base) or base == 0
-                        else round((latest - base) / abs(base) * 100, 2)
-                    )
-
-                groups[group] = {"net": series, "pct_change": pct_change}
 
             return {
                 "asset": asset,
                 "market": market,
                 "weeks": weeks,
-                "as_of": dates[-1],
+                "as_of": as_of,
                 "groups": groups,
             }
         except Exception as e:
             logger.error(f"Error computing asset group changes for {asset}: {e}", exc_info=True)
+            raise
+
+    async def get_instrument(self, asset: str, market: str | None = None,
+                             weeks: int = 52) -> dict:
+        """Everything this controller knows about ONE instrument, from a
+        single Redis fetch of its last `weeks` weekly reports:
+
+          - "changes"     : net-position series + trailing pct change per TFF
+                            trader group (dealer / asset_mgr / lev_money /
+                            other_rept) - same shape as asset_group_changes'
+                            "groups".
+          - "positioning" : percentile / score / z / mom_4w / label per
+                            _POS_LEGS category (asset_mgr, lev_money, dealer),
+                            computed fresh over this fetch via
+                            _positioning_metrics - NOT read from the cot_pos
+                            cache, so this works for any cot_ttf instrument,
+                            curated or not, on demand.
+          - "net_pct_oi"  : weekly net-%-of-open-interest history per
+                            _POS_LEGS category (_net_pct_oi_history).
+          - "summary"     : the cached LLM summary from cot_pos:{asset}, if
+                            the positioning cron has already scored this
+                            instrument. Never generated on demand - an LLM
+                            call is too slow for a request path. None if
+                            there's no cached blob yet.
+          - "raw"         : the unprocessed weekly hashes themselves, oldest
+                            first - [{"date": "2024-09-03", <every field CFTC
+                            publishes for that week: long/short legs per
+                            group, open_interest_all, traders_* counts, the
+                            precomputed *_net columns, ...>}, ...]. Straight
+                            off cot_ttf:{market}:{asset}:{date} via
+                            insert_cot_redis, so every value is still the raw
+                            string Redis stored (decode_responses=True) -
+                            callers coerce types themselves, same as this
+                            method does internally for the derived fields.
+
+        Returns {} if the instrument isn't in cot_ttf or has no cached hashes.
+        """
+        try:
+            if market is None:
+                market = await self._resolve_market(asset)
+                if market is None:
+                    logger.info(f"{asset} not found in cot_ttf")
+                    return {}
+
+            _, by_date = await self._fetch_recent_weeks(market, asset, weeks)
+            if not by_date:
+                logger.info(f"No cached COT hashes for {market}:{asset}")
+                return {}
+
+            changes, as_of = self._group_changes_history(by_date)
+            if as_of is None:
+                return {}
+
+            positioning = self._positioning_metrics({asset: by_date}).get(asset, {})
+            net_pct_oi = self._net_pct_oi_history(by_date)
+
+            # Cheap GET, no LLM call - reuse whatever summary the positioning
+            # cron already generated for this instrument, if any.
+            summary_raw = await self.aioredis.get(f"{COT_POS_KEY_PREFIX}:{asset}")
+            summary = json.loads(summary_raw).get("summary") if summary_raw else None
+
+            # The unprocessed weekly hashes, oldest-first - by_date is already
+            # {date: hash}, just flatten it into a list ordered the same way
+            # as every other series in this response.
+            raw = [{"date": d, **by_date[d]} for d in sorted(by_date)]
+
+            return {
+                "asset": asset,
+                "market": market,
+                "weeks": weeks,
+                "as_of": as_of,
+                "positioning": positioning,
+                "net_pct_oi": net_pct_oi,
+                "changes": changes,
+                "summary": summary,
+                "raw": raw,
+            }
+        except Exception as e:
+            logger.error(f"Error building instrument snapshot for {asset}: {e}", exc_info=True)
             raise
 
     async def instituitional_pos(self):

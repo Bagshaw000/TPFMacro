@@ -84,3 +84,27 @@ async def asset_group_changes(asset: str, market: str | None = None, weeks: int 
         return JSONResponse(status_code=200, content=data)
 
     return JSONResponse(status_code=404, content=None)
+
+
+@router.get("/instrument/{asset}")
+async def get_instrument(asset: str, market: str | None = None, weeks: int = 52):
+    """Everything cached for ONE instrument in a single call: positioning
+    metrics (percentile/score/z/mom_4w/label per trader group, computed fresh
+    - works for any cot_ttf instrument, not just the curated shortlist),
+    net-%-of-OI history, net-position change per trader group, the cached LLM
+    summary if the positioning cron has already scored it, and the raw
+    unprocessed weekly hashes themselves (every field CFTC publishes, as the
+    raw strings Redis stored).
+
+    `asset` is the instrument name (path); `market` is optional and looked up
+    from Postgres when omitted.
+    """
+    if weeks < 1:
+        return JSONResponse(status_code=422, content={"detail": "weeks must be >= 1"})
+
+    data = await cot_ctrl.get_instrument(asset, market=market, weeks=weeks)
+
+    if data:
+        return JSONResponse(status_code=200, content=data)
+
+    return JSONResponse(status_code=404, content=None)
