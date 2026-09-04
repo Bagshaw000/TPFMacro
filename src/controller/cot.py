@@ -398,8 +398,10 @@ class COTController:
         try:
             cot_status =  await  self.aioredis.get("cot_status")
 
-            # Check if the status updated
-            if int(cot_status) != 1:
+            # Check if the status updated. `cot_status` is None on a cold
+            # start (the key has never been written) - int(None) would raise
+            # TypeError, so treat "missing" the same as "not yet updated".
+            if cot_status is None or int(cot_status) != 1:
                 check_cot =   self.redis.keys("cot_ttf*")
              
 
