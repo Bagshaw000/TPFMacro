@@ -40,7 +40,7 @@ async def cross_section_panel():
     return JSONResponse(status_code=500, content=None)
 
 
-@router.get("/net_pct_oi")
+@router.get("/net_pct_oi/{scope}")
 async def net_pct_oi_timeseries(scope: str = "tracked", weeks: int = 52):
     """Net % of open interest as a weekly time series, per trader category, for
     every instrument in the positioning meta index.
